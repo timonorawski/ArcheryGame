@@ -53,7 +53,7 @@ def main():
     parser = argparse.ArgumentParser(description='AMS Demo - Multiple Detection Backends')
     parser.add_argument(
         '--backend',
-        choices=['mouse', 'laser'],
+        choices=['mouse', 'laser', 'object'],
         default='mouse',
         help='Detection backend to use (default: mouse)'
     )
@@ -219,6 +219,82 @@ def main():
 
         except Exception as e:
             print(f"\n   ERROR: Failed to initialize laser backend: {e}")
+            print("   Falling back to mouse backend...")
+            mouse_input = MouseInputSource()
+            detection_backend = InputSourceAdapter(
+                mouse_input,
+                DISPLAY_WIDTH,
+                DISPLAY_HEIGHT
+            )
+
+    elif args.backend == 'object':
+        # Object detection backend (nerf darts, arrows, etc.)
+        print("   Using: Camera → ObjectDetectionBackend → ColorBlobDetector")
+        print(f"   Camera ID: {args.camera_id}")
+        print(f"   Brightness threshold: {args.brightness}")
+
+        try:
+            from ams.camera import OpenCVCamera
+            from ams.object_detection_backend import ObjectDetectionBackend
+            from ams.object_detection import ColorBlobDetector, ColorBlobConfig
+            from calibration.calibration_manager import CalibrationManager
+            from models import CalibrationConfig
+            import os
+
+            camera = OpenCVCamera(camera_id=args.camera_id)
+
+            # Try to load existing calibration
+            calibration_manager = None
+            calib_path = "calibration.json"
+            if os.path.exists(calib_path):
+                try:
+                    calibration_manager = CalibrationManager(CalibrationConfig())
+                    calibration_manager.load_calibration(calib_path)
+                    print(f"   ✓ Loaded calibration from {calib_path}")
+                    quality = calibration_manager.get_calibration_quality()
+                    print(f"   Calibration quality: RMS error {quality.reprojection_error_rms:.2f}px")
+                except Exception as e:
+                    print(f"   Warning: Could not load calibration: {e}")
+                    calibration_manager = None
+            else:
+                print(f"   No calibration found. Press 'C' to calibrate.")
+
+            # Create color blob detector with default config for nerf darts
+            # Orange/red nerf darts: Hue 0-15 (red-orange in HSV)
+            blob_config = ColorBlobConfig(
+                hue_min=0,
+                hue_max=15,
+                saturation_min=100,
+                saturation_max=255,
+                value_min=100,
+                value_max=255,
+                min_area=50,
+                max_area=2000,
+            )
+            detector = ColorBlobDetector(blob_config)
+
+            detection_backend = ObjectDetectionBackend(
+                camera=camera,
+                detector=detector,
+                calibration_manager=calibration_manager,
+                display_width=DISPLAY_WIDTH,
+                display_height=DISPLAY_HEIGHT,
+                impact_velocity_threshold=15.0,  # Slower threshold for darts
+                impact_duration=0.15,  # 150ms stationary
+            )
+            detection_backend.set_debug_mode(True)  # Enable debug visualization
+
+            print("\n   NOTE: Object detection mode for nerf darts/arrows!")
+            print("   Default config: Orange/red color detection")
+            print("   Controls:")
+            print("     - Throw/shoot colored object at targets")
+            print("     - Press 'D' to toggle debug visualization")
+            print("     - Adjust HSV ranges in code for different colors")
+
+        except Exception as e:
+            print(f"\n   ERROR: Failed to initialize object detection backend: {e}")
+            import traceback
+            traceback.print_exc()
             print("   Falling back to mouse backend...")
             mouse_input = MouseInputSource()
             detection_backend = InputSourceAdapter(
