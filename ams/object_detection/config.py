@@ -15,6 +15,12 @@ class DetectorType(str, Enum):
     DEEP_LEARNING = "deep_learning"
 
 
+class ImpactMode(str, Enum):
+    """Impact detection modes for different object types."""
+    TRAJECTORY_CHANGE = "trajectory_change"  # Bouncing objects (nerf darts, balls)
+    STATIONARY = "stationary"                # Sticking objects (real darts, arrows)
+
+
 class ColorBlobConfig(BaseModel):
     """Configuration for color blob detector.
 
@@ -61,16 +67,42 @@ class ColorBlobConfig(BaseModel):
 class ImpactDetectionConfig(BaseModel):
     """Configuration for impact detection."""
 
+    mode: ImpactMode = Field(
+        default=ImpactMode.TRAJECTORY_CHANGE,
+        description="Impact detection mode: trajectory_change (bouncing) or stationary (sticking)"
+    )
+
+    # Stationary mode parameters
     velocity_threshold: float = Field(
         default=10.0,
         ge=0.0,
-        description="Velocity threshold (pixels/sec) for considering object stopped"
+        description="Velocity threshold (pixels/sec) for considering object stopped (stationary mode)"
     )
     stationary_duration: float = Field(
         default=0.1,
         ge=0.0,
-        description="Duration (seconds) object must be stationary"
+        description="Duration (seconds) object must be stationary (stationary mode)"
     )
+
+    # Trajectory change mode parameters
+    velocity_change_threshold: float = Field(
+        default=100.0,
+        ge=0.0,
+        description="Magnitude of velocity change to detect impact (trajectory_change mode, px/s)"
+    )
+    direction_change_threshold: float = Field(
+        default=90.0,
+        ge=0.0,
+        le=180.0,
+        description="Minimum direction change in degrees to detect bounce (trajectory_change mode)"
+    )
+    min_impact_velocity: float = Field(
+        default=50.0,
+        ge=0.0,
+        description="Minimum speed before impact to register (avoids slow rolling, px/s)"
+    )
+
+    # General parameters
     max_tracking_gap: float = Field(
         default=0.5,
         ge=0.0,

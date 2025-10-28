@@ -66,14 +66,60 @@ Each detected object is tracked frame-to-frame to calculate velocity:
 - **Bounding box**: Rectangle around the object
 
 ### 3. Impact Detection
-An impact is registered when:
+
+The system supports **two impact detection modes** for different object types:
+
+#### Mode 1: TRAJECTORY_CHANGE (Default - Bouncing Objects)
+
+Best for: **Nerf darts, foam balls, bouncing projectiles**
+
+Detects impacts by sudden changes in velocity or direction:
+
+1. **Object moving fast**: Speed above minimum threshold (default: 50 pixels/sec)
+2. **Sudden change**: Large velocity change (100+ px/s) OR direction change (90+ degrees)
+3. **Register impact**: At the position before the bounce
+
+```
+Moving fast → HIT! → Bounce off
+```
+
+Example configuration:
+```python
+from ams.object_detection import ImpactMode
+
+ObjectDetectionBackend(
+    camera=camera,
+    detector=detector,
+    impact_mode=ImpactMode.TRAJECTORY_CHANGE,  # Default
+    velocity_change_threshold=100.0,  # Detect 100px/s velocity change
+    direction_change_threshold=90.0,  # Detect 90° direction change
+    min_impact_velocity=50.0,  # Must be moving at least 50px/s
+)
+```
+
+#### Mode 2: STATIONARY (Sticking Objects)
+
+Best for: **Real darts, arrows, projectiles that stick**
+
+Detects impacts when object stops and stays:
 
 1. **Object slows down**: Velocity drops below threshold (default: 15 pixels/sec)
 2. **Stays stationary**: Remains slow for minimum duration (default: 150ms)
-3. **Within bounds**: Position is within game area after calibration
+3. **Register impact**: At the stationary position
 
 ```
 Moving → Slowing → Stationary (150ms) → IMPACT!
+```
+
+Example configuration:
+```python
+ObjectDetectionBackend(
+    camera=camera,
+    detector=detector,
+    impact_mode=ImpactMode.STATIONARY,
+    impact_velocity_threshold=15.0,  # Speed threshold for "stopped"
+    impact_duration=0.15,  # 150ms stationary required
+)
 ```
 
 ### 4. Coordinate Transformation
@@ -100,19 +146,26 @@ Different colored objects require different HSV ranges:
 
 ### Impact Detection Parameters
 
-```python
-ObjectDetectionBackend(
-    camera=camera,
-    detector=detector,
-    impact_velocity_threshold=15.0,  # Adjust for faster/slower objects
-    impact_duration=0.15,             # Adjust for more/less sensitive detection
-)
-```
+#### Trajectory Change Mode (Bouncing Objects)
+
+| Parameter | Description | Suggested Range |
+|-----------|-------------|-----------------|
+| `velocity_change_threshold` | Velocity change magnitude to detect (px/s) | 80-150 |
+| `direction_change_threshold` | Direction change to detect (degrees) | 70-120 |
+| `min_impact_velocity` | Minimum speed before impact (px/s) | 30-100 |
+
+**For faster objects** (hard throws): Increase `velocity_change_threshold` and `min_impact_velocity`
+**For slower objects** (gentle tosses): Decrease `min_impact_velocity` to 30-40
+
+#### Stationary Mode (Sticking Objects)
 
 | Parameter | Description | Suggested Range |
 |-----------|-------------|-----------------|
 | `impact_velocity_threshold` | Speed below which object is "stopped" (px/s) | 10-30 |
 | `impact_duration` | How long object must be stopped (seconds) | 0.1-0.3 |
+
+**For more sensitive** (detect quickly): Use 0.1s duration
+**For more reliable** (avoid false positives): Use 0.2-0.3s duration
 
 ## Controls
 

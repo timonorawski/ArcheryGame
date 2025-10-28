@@ -23,6 +23,7 @@ from .object_detection import (
     ImpactEvent,
     ColorBlobDetector,
     ColorBlobConfig,
+    ImpactMode,
 )
 
 
@@ -53,8 +54,12 @@ class ObjectDetectionBackend(DetectionBackend):
         calibration_manager: Optional[CalibrationManager] = None,
         display_width: int = 1920,
         display_height: int = 1080,
+        impact_mode: ImpactMode = ImpactMode.TRAJECTORY_CHANGE,
         impact_velocity_threshold: float = 10.0,
         impact_duration: float = 0.15,
+        velocity_change_threshold: float = 100.0,
+        direction_change_threshold: float = 90.0,
+        min_impact_velocity: float = 50.0,
     ):
         """Initialize object detection backend.
 
@@ -64,8 +69,12 @@ class ObjectDetectionBackend(DetectionBackend):
             calibration_manager: ArUco calibration manager (optional)
             display_width: Display width in pixels
             display_height: Display height in pixels
-            impact_velocity_threshold: Speed threshold (px/s) for impact
-            impact_duration: Duration (s) object must be stationary
+            impact_mode: Detection mode (TRAJECTORY_CHANGE for bouncing, STATIONARY for sticking)
+            impact_velocity_threshold: Speed threshold (px/s) for stationary mode
+            impact_duration: Duration (s) object must be stationary for stationary mode
+            velocity_change_threshold: Velocity change magnitude (px/s) for trajectory_change mode
+            direction_change_threshold: Direction change (degrees) for trajectory_change mode
+            min_impact_velocity: Minimum speed before impact (px/s) for trajectory_change mode
         """
         self.camera = camera
         self.detector = detector or ColorBlobDetector()
@@ -73,9 +82,17 @@ class ObjectDetectionBackend(DetectionBackend):
         self.display_width = display_width
         self.display_height = display_height
 
-        # Impact detection parameters
+        # Impact detection mode and parameters
+        self.impact_mode = impact_mode
+
+        # Stationary mode parameters
         self.impact_velocity_threshold = impact_velocity_threshold
         self.impact_duration = impact_duration
+
+        # Trajectory change mode parameters
+        self.velocity_change_threshold = velocity_change_threshold
+        self.direction_change_threshold = direction_change_threshold
+        self.min_impact_velocity = min_impact_velocity
 
         # Tracking state
         self.tracked_objects: Dict[int, TrackedObject] = {}
@@ -169,36 +186,75 @@ class ObjectDetectionBackend(DetectionBackend):
                 det_idx, det = closest_det
                 matched_detections.add(det_idx)
 
-                # Calculate speed
+                # Calculate current speed
                 speed = math.sqrt(det.velocity.x ** 2 + det.velocity.y ** 2)
 
-                # Check if stationary (below velocity threshold)
-                is_stationary = speed < self.impact_velocity_threshold
+                # Get previous velocity for trajectory change detection
+                prev_velocity = tracked.last_detection.velocity
+                prev_speed = math.sqrt(prev_velocity.x ** 2 + prev_velocity.y ** 2)
 
-                if is_stationary:
-                    # Object is stationary
-                    if tracked.stationary_since is None:
-                        # Just became stationary
-                        tracked.stationary_since = timestamp
-                    else:
-                        # Check if stationary long enough for impact
-                        stationary_duration = timestamp - tracked.stationary_since
+                # Impact detection based on mode
+                impact_detected = False
 
-                        if stationary_duration >= self.impact_duration:
-                            # Register impact!
+                if self.impact_mode == ImpactMode.TRAJECTORY_CHANGE:
+                    # Trajectory change mode - detect bounces
+                    # Calculate velocity change magnitude
+                    velocity_change_mag = math.sqrt(
+                        (det.velocity.x - prev_velocity.x) ** 2 +
+                        (det.velocity.y - prev_velocity.y) ** 2
+                    )
+
+                    # Calculate direction change
+                    direction_change = self._calculate_direction_change(prev_velocity, det.velocity)
+
+                    # Check if this looks like an impact (bounce)
+                    # Requirements:
+                    # 1. Object was moving fast enough before impact
+                    # 2. Significant velocity change OR direction change
+                    if prev_speed >= self.min_impact_velocity:
+                        if (velocity_change_mag >= self.velocity_change_threshold or
+                            direction_change >= self.direction_change_threshold):
+                            # Detected bounce/impact!
+                            impact_detected = True
                             impact = ImpactEvent(
-                                position=det.position,
-                                velocity_before=tracked.last_detection.velocity,
+                                position=tracked.last_detection.position,  # Use position before bounce
+                                velocity_before=prev_velocity,
                                 timestamp=timestamp,
-                                stationary_duration=stationary_duration
+                                stationary_duration=0.0  # N/A for trajectory change mode
                             )
                             impacts.append(impact)
 
-                            # Stop tracking this object (impact registered)
-                            continue
-                else:
-                    # Object is moving, reset stationary timer
-                    tracked.stationary_since = None
+                            # Continue tracking (object bounces off, doesn't stop)
+
+                elif self.impact_mode == ImpactMode.STATIONARY:
+                    # Stationary mode - detect when object stops and stays
+                    is_stationary = speed < self.impact_velocity_threshold
+
+                    if is_stationary:
+                        # Object is stationary
+                        if tracked.stationary_since is None:
+                            # Just became stationary
+                            tracked.stationary_since = timestamp
+                        else:
+                            # Check if stationary long enough for impact
+                            stationary_duration = timestamp - tracked.stationary_since
+
+                            if stationary_duration >= self.impact_duration:
+                                # Register impact!
+                                impact_detected = True
+                                impact = ImpactEvent(
+                                    position=det.position,
+                                    velocity_before=tracked.last_detection.velocity,
+                                    timestamp=timestamp,
+                                    stationary_duration=stationary_duration
+                                )
+                                impacts.append(impact)
+
+                                # Stop tracking this object (impact registered)
+                                continue
+                    else:
+                        # Object is moving, reset stationary timer
+                        tracked.stationary_since = None
 
                 # Update tracked object
                 tracked.last_detection = det
@@ -227,6 +283,39 @@ class ObjectDetectionBackend(DetectionBackend):
         self.tracked_objects = current_tracks
 
         return impacts
+
+    def _calculate_direction_change(self, v1: Point2D, v2: Point2D) -> float:
+        """Calculate angle change between two velocity vectors.
+
+        Args:
+            v1: Previous velocity vector
+            v2: Current velocity vector
+
+        Returns:
+            Angle change in degrees (0-180)
+        """
+        # Calculate magnitudes
+        mag1 = math.sqrt(v1.x ** 2 + v1.y ** 2)
+        mag2 = math.sqrt(v2.x ** 2 + v2.y ** 2)
+
+        # Avoid division by zero
+        if mag1 < 1.0 or mag2 < 1.0:
+            return 0.0
+
+        # Calculate dot product
+        dot = v1.x * v2.x + v1.y * v2.y
+
+        # Calculate cosine of angle
+        cos_angle = dot / (mag1 * mag2)
+
+        # Clamp to valid range for acos
+        cos_angle = max(-1.0, min(1.0, cos_angle))
+
+        # Calculate angle in radians, then convert to degrees
+        angle_rad = math.acos(cos_angle)
+        angle_deg = math.degrees(angle_rad)
+
+        return angle_deg
 
     def _camera_to_game(self, camera_pos: Point2D) -> Optional[Point2D]:
         """Transform camera coordinates to normalized game coordinates.

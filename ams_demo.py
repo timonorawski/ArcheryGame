@@ -236,7 +236,7 @@ def main():
         try:
             from ams.camera import OpenCVCamera
             from ams.object_detection_backend import ObjectDetectionBackend
-            from ams.object_detection import ColorBlobDetector, ColorBlobConfig
+            from ams.object_detection import ColorBlobDetector, ColorBlobConfig, ImpactMode
             from calibration.calibration_manager import CalibrationManager
             from models import CalibrationConfig
             import os
@@ -279,17 +279,22 @@ def main():
                 calibration_manager=calibration_manager,
                 display_width=DISPLAY_WIDTH,
                 display_height=DISPLAY_HEIGHT,
-                impact_velocity_threshold=15.0,  # Slower threshold for darts
-                impact_duration=0.15,  # 150ms stationary
+                impact_mode=ImpactMode.TRAJECTORY_CHANGE,  # Bouncing objects (nerf darts, balls)
+                velocity_change_threshold=100.0,  # Detect 100px/s velocity change
+                direction_change_threshold=90.0,  # Detect 90° direction change
+                min_impact_velocity=50.0,  # Must be moving at least 50px/s before impact
             )
             detection_backend.set_debug_mode(True)  # Enable debug visualization
 
-            print("\n   NOTE: Object detection mode for nerf darts/arrows!")
+            print("\n   NOTE: Object detection mode for nerf darts/balls (bouncing objects)!")
             print("   Default config: Orange/red color detection")
+            print("   Impact mode: TRAJECTORY_CHANGE (detects bounces)")
             print("   Controls:")
             print("     - Throw/shoot colored object at targets")
             print("     - Press 'D' to toggle debug visualization")
             print("     - Adjust HSV ranges in code for different colors")
+            print("\n   To use STATIONARY mode (for real darts/arrows that stick):")
+            print("     Set impact_mode=ImpactMode.STATIONARY in code")
 
         except Exception as e:
             print(f"\n   ERROR: Failed to initialize object detection backend: {e}")

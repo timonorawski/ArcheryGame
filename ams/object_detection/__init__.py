@@ -6,7 +6,7 @@ Provides flexible object detection with pluggable detector implementations.
 
 from .base import ObjectDetector, DetectedObject, ImpactEvent
 from .color_blob import ColorBlobDetector
-from .config import ColorBlobConfig, DetectorType
+from .config import ColorBlobConfig, DetectorType, ImpactMode, ImpactDetectionConfig
 
 __all__ = [
     "ObjectDetector",
@@ -15,4 +15,6 @@ __all__ = [
     "ColorBlobDetector",
     "ColorBlobConfig",
     "DetectorType",
+    "ImpactMode",
+    "ImpactDetectionConfig",
 ]

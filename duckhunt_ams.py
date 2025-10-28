@@ -216,7 +216,7 @@ def main():
         try:
             from ams.camera import OpenCVCamera
             from ams.object_detection_backend import ObjectDetectionBackend
-            from ams.object_detection import ColorBlobDetector, ColorBlobConfig
+            from ams.object_detection import ColorBlobDetector, ColorBlobConfig, ImpactMode
             from calibration.calibration_manager import CalibrationManager
             from models import CalibrationConfig
 
@@ -257,12 +257,15 @@ def main():
                 calibration_manager=calibration_manager,
                 display_width=DISPLAY_WIDTH,
                 display_height=DISPLAY_HEIGHT,
-                impact_velocity_threshold=15.0,
-                impact_duration=0.15,
+                impact_mode=ImpactMode.TRAJECTORY_CHANGE,  # Bouncing objects
+                velocity_change_threshold=100.0,
+                direction_change_threshold=90.0,
+                min_impact_velocity=50.0,
             )
             detection_backend.set_debug_mode(True)
 
-            print("\n   NOTE: Object detection mode for nerf darts!")
+            print("\n   NOTE: Object detection mode for nerf darts (bouncing objects)!")
+            print("   Impact mode: TRAJECTORY_CHANGE (detects bounces)")
             print("   Controls:")
             print("     - Shoot colored object at targets")
             print("     - Press 'D' to toggle debug visualization")
