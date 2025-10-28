@@ -37,7 +37,7 @@ import time
 import argparse
 
 # Add paths for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Games', 'DuckHunt'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'games', 'DuckHunt'))
 
 from ams.session import AMSSession
 from ams.detection_backend import InputSourceAdapter

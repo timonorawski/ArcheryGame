@@ -187,3 +187,48 @@ class GameModeLoader:
             'version': config_dict.get('version', '0.0.0'),
             'unlock_requirement': config_dict.get('unlock_requirement', 0),
         }
+
+
+def load_game_mode_config(yaml_path: str) -> GameModeConfig:
+    """Convenience function to load a game mode configuration from a YAML file.
+
+    This is a simple wrapper around GameModeLoader for loading a single mode
+    from an absolute or relative YAML file path.
+
+    Args:
+        yaml_path: Path to the YAML configuration file
+
+    Returns:
+        Validated GameModeConfig instance
+
+    Raises:
+        FileNotFoundError: If the YAML file doesn't exist
+        ValidationError: If the YAML content is invalid
+        yaml.YAMLError: If the YAML syntax is malformed
+
+    Examples:
+        >>> config = load_game_mode_config("modes/classic_ducks.yaml")
+        >>> config.metadata.name
+        'Classic Duck Hunt'
+    """
+    yaml_path_obj = Path(yaml_path)
+
+    if not yaml_path_obj.exists():
+        raise FileNotFoundError(f"Game mode file not found: {yaml_path}")
+
+    # Load YAML file
+    try:
+        with open(yaml_path_obj, 'r') as f:
+            config_dict = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise yaml.YAMLError(f"Failed to parse YAML file '{yaml_path}': {e}")
+
+    # Validate with Pydantic
+    try:
+        config = GameModeConfig(**config_dict)
+    except ValidationError as e:
+        raise ValueError(
+            f"Invalid game mode configuration in '{yaml_path}':\n{e}"
+        ) from e
+
+    return config

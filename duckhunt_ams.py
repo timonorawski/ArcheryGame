@@ -32,7 +32,7 @@ import os
 import argparse
 
 # Add DuckHunt to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Games', 'DuckHunt'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'games', 'DuckHunt'))
 
 from ams.session import AMSSession
 from ams.detection_backend import InputSourceAdapter
@@ -242,7 +242,7 @@ def main():
     from game.mode_loader import load_game_mode_config
 
     # Load game mode configuration
-    mode_path = os.path.join('Games', 'DuckHunt', 'modes', f'{args.mode}.yaml')
+    mode_path = os.path.join('games', 'DuckHunt', 'modes', f'{args.mode}.yaml')
     if not os.path.exists(mode_path):
         print(f"   ERROR: Mode file not found: {mode_path}")
         print(f"   Available modes: classic_archery, classic_ducks, classic_linear")
