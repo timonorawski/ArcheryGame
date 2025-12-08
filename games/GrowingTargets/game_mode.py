@@ -11,12 +11,13 @@ import pygame
 
 from models import Vector2D
 from games.common import GameState
+from games.common.base_game import BaseGame
 from games.common.input import InputEvent
 from games.GrowingTargets import config
 from games.GrowingTargets.target import GrowingTarget, TargetSpawner
 
 
-class GrowingTargetsMode:
+class GrowingTargetsMode(BaseGame):
     """GrowingTargets game mode - hit targets while they're small.
 
     Core mechanic: Targets spawn small and grow over time.
@@ -29,13 +30,67 @@ class GrowingTargetsMode:
     artificial timers or pressure mechanics.
     """
 
+    # Game metadata
+    NAME = "Growing Targets"
+    DESCRIPTION = "Targets grow over time - hit small for max points, or wait for easier shot"
+    VERSION = "1.0.0"
+    AUTHOR = "AMS Team"
+
+    # CLI arguments
+    ARGUMENTS = [
+        {
+            'name': '--pacing',
+            'type': str,
+            'default': 'throwing',
+            'help': 'Pacing preset: archery (slow), throwing (medium), blaster (fast)'
+        },
+        {
+            'name': '--spawn-rate',
+            'type': float,
+            'default': None,
+            'help': 'Seconds between target spawns (overrides pacing preset)'
+        },
+        {
+            'name': '--max-targets',
+            'type': int,
+            'default': None,
+            'help': 'Maximum simultaneous targets (overrides pacing preset)'
+        },
+        {
+            'name': '--growth-rate',
+            'type': float,
+            'default': None,
+            'help': 'Growth rate (pixels per second) (overrides pacing preset)'
+        },
+        {
+            'name': '--start-size',
+            'type': int,
+            'default': None,
+            'help': 'Initial target radius (overrides pacing preset)'
+        },
+        {
+            'name': '--max-size',
+            'type': int,
+            'default': None,
+            'help': 'Maximum target radius (overrides pacing preset)'
+        },
+        {
+            'name': '--miss-penalty',
+            'type': int,
+            'default': None,
+            'help': 'Points lost per miss'
+        },
+        {
+            'name': '--lives',
+            'type': int,
+            'default': None,
+            'help': 'Number of lives (0 = unlimited)'
+        },
+    ]
+
     def __init__(
         self,
         pacing: str = 'throwing',
-        color_palette: Optional[List] = None,
-        palette: Optional[str] = None,
-        quiver_size: Optional[int] = None,
-        retrieval_pause: Optional[float] = None,
         spawn_rate: Optional[float] = None,
         max_targets: Optional[int] = None,
         growth_rate: Optional[float] = None,
@@ -49,10 +104,6 @@ class GrowingTargetsMode:
 
         Args:
             pacing: Pacing preset name (archery/throwing/blaster)
-            color_palette: AMS color palette (list of RGB tuples)
-            palette: Named test palette (for standalone mode)
-            quiver_size: Shots per round (None/0 = unlimited)
-            retrieval_pause: Seconds for retrieval (0 = manual)
             spawn_rate: Seconds between target spawns (overrides pacing)
             max_targets: Maximum simultaneous targets (overrides pacing)
             growth_rate: Target growth rate (pixels/second) (overrides pacing)
@@ -60,9 +111,13 @@ class GrowingTargetsMode:
             max_size: Maximum target radius (overrides pacing)
             miss_penalty: Points lost per miss
             lives: Number of lives (0 = unlimited)
+            **kwargs: Additional arguments (palette, quiver_size, etc.) handled by BaseGame
         """
+        # Initialize BaseGame (handles palette and quiver)
+        super().__init__(**kwargs)
+
         # Import shared infrastructure
-        from games.common import GamePalette, create_quiver, get_pacing_preset
+        from games.common import get_pacing_preset
         from games.GrowingTargets.config import PACING_PRESETS
 
         # Apply pacing preset with overrides
@@ -74,17 +129,6 @@ class GrowingTargetsMode:
         self._max_size = max_size if max_size is not None else preset.max_size
         self._miss_penalty = miss_penalty or config.MISS_PENALTY
         self._max_lives = lives if lives is not None else config.DEFAULT_LIVES
-
-        # Initialize palette (AMS colors or test palette)
-        if color_palette:
-            self._palette = GamePalette(colors=color_palette)
-        elif palette:
-            self._palette = GamePalette(palette_name=palette)
-        else:
-            self._palette = GamePalette()
-
-        # Initialize quiver
-        self._quiver = create_quiver(quiver_size, retrieval_pause if retrieval_pause is not None else 30.0)
 
         # Game state
         self._state = GameState.PLAYING
@@ -114,26 +158,13 @@ class GrowingTargetsMode:
         self._games_played = 0
         self._start_time = time.monotonic()
 
-    @property
-    def state(self) -> GameState:
-        """Current game state."""
+    def _get_internal_state(self) -> GameState:
+        """Map internal game state to standard GameState."""
         return self._state
 
     def get_score(self) -> int:
         """Get current score."""
         return self._score
-
-    def set_palette(self, palette_name: str) -> bool:
-        """
-        Switch to a named test palette.
-
-        Args:
-            palette_name: Name from TEST_PALETTES
-
-        Returns:
-            True if palette found and switched, False otherwise
-        """
-        return self._palette.set_palette(palette_name)
 
     def _ensure_spawner(self) -> None:
         """Ensure spawner is initialized."""
@@ -190,7 +221,7 @@ class GrowingTargetsMode:
             self._restart()
             return
 
-        if self._state == GameState.RETRIEVAL:
+        if self.state == GameState.RETRIEVAL:
             # Ignore clicks during retrieval
             return
 
@@ -213,8 +244,8 @@ class GrowingTargetsMode:
                 self._best_hit_multiplier = multiplier
 
             # Use quiver shot
-            if self._quiver and self._quiver.use_shot():
-                self._enter_retrieval()
+            if self._use_shot():
+                self._start_retrieval()
 
             # Hit effect color - use palette colors
             target_colors = self._palette.get_target_colors()
@@ -241,8 +272,8 @@ class GrowingTargetsMode:
             self._misses += 1
 
             # Use quiver shot
-            if self._quiver and self._quiver.use_shot():
-                self._enter_retrieval()
+            if self._use_shot():
+                self._start_retrieval()
 
             self._miss_effects.append({
                 'position': position,
@@ -259,23 +290,11 @@ class GrowingTargetsMode:
             if self._lives <= 0:
                 self._state = GameState.GAME_OVER
 
-    def _enter_retrieval(self) -> None:
-        """Enter retrieval state when quiver is empty."""
-        self._state = GameState.RETRIEVAL
-        if self._quiver:
-            self._quiver.start_retrieval()
-
     def handle_retrieval_ready(self) -> None:
         """Handle manual retrieval ready signal (SPACE key)."""
-        if self._state == GameState.RETRIEVAL and self._quiver:
+        if self.state == GameState.RETRIEVAL and self._quiver:
             if self._quiver.is_manual_retrieval:
-                self._exit_retrieval()
-
-    def _exit_retrieval(self) -> None:
-        """Exit retrieval state and resume gameplay."""
-        if self._quiver:
-            self._quiver.end_retrieval()
-        self._state = GameState.PLAYING
+                self._end_retrieval()
 
     def update(self, dt: float) -> None:
         """Update game state."""
@@ -283,10 +302,9 @@ class GrowingTargetsMode:
             return
 
         # Handle retrieval state
-        if self._state == GameState.RETRIEVAL:
-            if self._quiver:
-                if self._quiver.update_retrieval(dt):
-                    self._exit_retrieval()
+        if self.state == GameState.RETRIEVAL:
+            if self._update_retrieval(dt):
+                self._end_retrieval()
             return
 
         self._ensure_spawner()
@@ -344,7 +362,7 @@ class GrowingTargetsMode:
         self._render_hud(screen)
 
         # Draw retrieval screen
-        if self._state == GameState.RETRIEVAL:
+        if self.state == GameState.RETRIEVAL:
             self._render_retrieval(screen)
 
         # Draw game over screen

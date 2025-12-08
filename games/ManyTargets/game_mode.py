@@ -12,24 +12,25 @@ import pygame
 
 from models import Vector2D
 from games.common import GameState
+from games.common.base_game import BaseGame
 from games.common.input import InputEvent
-from games.common.palette import GamePalette
-from games.common.quiver import create_quiver, QuiverState
 from games.ManyTargets import config
 from games.ManyTargets.target_field import TargetField, MissMode, HitResult
 
 
 class _InternalState(Enum):
-    """Internal states for ManyTargets game flow."""
+    """Internal states for ManyTargets game flow.
+
+    Note: RETRIEVAL is handled by BaseGame._in_retrieval flag, not here.
+    """
     READY = auto()           # Showing targets, waiting for first shot
     PLAYING = auto()         # Active round in progress
-    RETRIEVAL = auto()       # Paused for arrow/dart retrieval
     COMPLETE = auto()        # All targets hit (win)
     FAILED = auto()          # Strict mode miss (loss)
     TIMEOUT = auto()         # Time ran out (loss)
 
 
-class ManyTargetsMode:
+class ManyTargetsMode(BaseGame):
     """ManyTargets game mode - clear the field of targets.
 
     Game flow:
@@ -39,6 +40,88 @@ class ManyTargetsMode:
     4. Round ends when: all hit (COMPLETE), miss in strict mode (FAILED), or timeout
     5. Click to start new round
     """
+
+    # Game metadata
+    NAME = "ManyTargets"
+    DESCRIPTION = "Clear the field of targets - misses cost points. Inspired by egg carton training."
+    VERSION = "1.0.0"
+    AUTHOR = "AMS Team"
+
+    # CLI argument definitions
+    ARGUMENTS = [
+        {
+            'name': '--count',
+            'type': int,
+            'default': None,
+            'help': 'Number of targets to generate (default: 15)'
+        },
+        {
+            'name': '--size',
+            'type': str,
+            'default': None,
+            'help': 'Target size: small, medium, large (default: medium)'
+        },
+        {
+            'name': '--timed',
+            'type': int,
+            'default': None,
+            'help': 'Time limit in seconds (default: unlimited)'
+        },
+        {
+            'name': '--miss-mode',
+            'type': str,
+            'default': None,
+            'help': 'Miss behavior: penalty (default) or strict (game over on miss)'
+        },
+        {
+            'name': '--allow-duplicates',
+            'action': 'store_true',
+            'default': False,
+            'help': 'Allow hitting same target multiple times (penalized)'
+        },
+        {
+            'name': '--progressive',
+            'action': 'store_true',
+            'default': False,
+            'help': 'Targets shrink as you clear the field'
+        },
+        {
+            'name': '--shrink-rate',
+            'type': float,
+            'default': None,
+            'help': 'Size multiplier per hit in progressive mode (default: 0.9)'
+        },
+        {
+            'name': '--min-size',
+            'type': int,
+            'default': None,
+            'help': 'Minimum target radius in progressive mode (default: 15)'
+        },
+        {
+            'name': '--spacing',
+            'type': float,
+            'default': None,
+            'help': 'Minimum spacing between targets as radius multiplier (default: 1.5)'
+        },
+        {
+            'name': '--quiver-size',
+            'type': int,
+            'default': None,
+            'help': 'Arrows per round before retrieval (0 or omit = unlimited)'
+        },
+        {
+            'name': '--retrieval-pause',
+            'type': int,
+            'default': None,
+            'help': 'Seconds for retrieval pause between rounds (0 = manual with SPACE, default: 30)'
+        },
+        {
+            'name': '--palette',
+            'type': str,
+            'default': None,
+            'help': 'Color palette for testing (full, bw, warm, cool, mono_red, mono_green, limited, orange_dart)'
+        },
+    ]
 
     def __init__(
         self,
@@ -72,6 +155,14 @@ class ManyTargetsMode:
             retrieval_pause: Seconds for retrieval pause (0 = manual with SPACE)
             palette: Color palette name for testing
         """
+        # Initialize base game (handles palette and quiver)
+        super().__init__(
+            palette=palette,
+            quiver_size=quiver_size or config.DEFAULT_QUIVER_SIZE,
+            retrieval_pause=float(retrieval_pause) if retrieval_pause is not None else config.DEFAULT_RETRIEVAL_PAUSE,
+            **kwargs
+        )
+
         self._target_count = count or config.DEFAULT_TARGET_COUNT
         self._target_radius = self._parse_size(size)
         self._time_limit = timed
@@ -81,15 +172,6 @@ class ManyTargetsMode:
         self._shrink_rate = shrink_rate or config.DEFAULT_SHRINK_RATE
         self._min_size = min_size or config.MIN_TARGET_SIZE
         self._spacing = spacing or config.MIN_TARGET_SPACING
-
-        # Quiver/ammo management
-        self._quiver: Optional[QuiverState] = create_quiver(
-            quiver_size=quiver_size or config.DEFAULT_QUIVER_SIZE,
-            retrieval_pause=float(retrieval_pause) if retrieval_pause is not None else config.DEFAULT_RETRIEVAL_PAUSE
-        )
-
-        # Color palette
-        self._palette = GamePalette(palette_name=palette)
 
         self._internal_state = _InternalState.READY
         self._field: Optional[TargetField] = None
@@ -122,12 +204,10 @@ class ManyTargetsMode:
         else:
             return config.TARGET_RADIUS_MEDIUM
 
-    @property
-    def state(self) -> GameState:
-        """Current game state (mapped to standard GameState)."""
-        if self._internal_state == _InternalState.RETRIEVAL:
-            return GameState.RETRIEVAL
-        elif self._internal_state == _InternalState.COMPLETE:
+    def _get_internal_state(self) -> GameState:
+        """Map internal state to standard GameState for BaseGame."""
+        # Note: BaseGame.state property handles RETRIEVAL via _in_retrieval flag
+        if self._internal_state == _InternalState.COMPLETE:
             return GameState.WON
         elif self._internal_state in (_InternalState.FAILED, _InternalState.TIMEOUT):
             return GameState.GAME_OVER
@@ -139,27 +219,6 @@ class ManyTargetsMode:
         if self._field is None:
             return 0
         return self._field.calculate_score()
-
-    def set_palette(self, palette_name: str) -> bool:
-        """
-        Switch to a named test palette (for P key cycling).
-
-        Args:
-            palette_name: Name from TEST_PALETTES
-
-        Returns:
-            True if palette found and switched
-        """
-        return self._palette.set_palette(palette_name)
-
-    def cycle_palette(self) -> str:
-        """
-        Cycle to next test palette (for P key).
-
-        Returns:
-            Name of new palette
-        """
-        return self._palette.cycle_palette()
 
     def _start_new_round(self) -> None:
         """Initialize a new round."""
@@ -190,7 +249,7 @@ class ManyTargetsMode:
         Args:
             key: pygame key constant
         """
-        if key == pygame.K_SPACE and self._internal_state == _InternalState.RETRIEVAL:
+        if key == pygame.K_SPACE and self._in_retrieval:
             # Manual retrieval ready
             if self._quiver and self._quiver.is_manual_retrieval:
                 self._end_retrieval()
@@ -200,7 +259,7 @@ class ManyTargetsMode:
         if self._field is None:
             return
 
-        if self._internal_state == _InternalState.RETRIEVAL:
+        if self._in_retrieval:
             # Ignore shots during retrieval
             return
 
@@ -260,15 +319,13 @@ class ManyTargetsMode:
 
     def _start_retrieval(self) -> None:
         """Enter retrieval pause state."""
-        self._internal_state = _InternalState.RETRIEVAL
-        if self._quiver:
-            self._quiver.start_retrieval()
+        # BaseGame handles _in_retrieval flag and quiver.start_retrieval()
+        super()._start_retrieval()
 
     def _end_retrieval(self) -> None:
         """End retrieval pause, resume play."""
-        if self._quiver:
-            self._quiver.end_retrieval()
-        self._internal_state = _InternalState.PLAYING
+        # BaseGame handles _in_retrieval flag and quiver.end_retrieval()
+        super()._end_retrieval()
 
     def _end_round(self, end_state: _InternalState) -> None:
         """End the current round."""
@@ -294,8 +351,8 @@ class ManyTargetsMode:
             return
 
         # Handle retrieval state
-        if self._internal_state == _InternalState.RETRIEVAL:
-            if self._quiver and self._quiver.update_retrieval(dt):
+        if self._in_retrieval:
+            if self._update_retrieval(dt):
                 self._end_retrieval()
             return  # Don't update timer during retrieval
 
@@ -478,7 +535,7 @@ class ManyTargetsMode:
             text = font_medium.render("Clear the field!", True, (100, 255, 100))
             screen.blit(text, (x_offset, y_offset))
             y_offset += 40
-        elif self._internal_state == _InternalState.RETRIEVAL:
+        elif self._in_retrieval:
             # Show retrieval screen
             self._render_retrieval_screen(screen)
             return  # Skip rest of HUD

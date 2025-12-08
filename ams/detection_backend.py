@@ -16,8 +16,8 @@ from typing import List, Optional
 import sys
 import os
 
-# Add Games/DuckHunt to path to import existing input system
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Games', 'DuckHunt'))
+# Add games/DuckHunt to path to import existing input system
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'games', 'DuckHunt'))
 
 from ams.events import PlaneHitEvent, CalibrationResult
 

@@ -6,8 +6,9 @@ Uses pluggable object detectors and ArUco calibration.
 """
 
 import cv2
-import numpy as np
+import logging
 import math
+import numpy as np
 import time
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
@@ -17,6 +18,8 @@ from ams.camera import CameraInterface
 from ams.events import PlaneHitEvent, CalibrationResult
 from calibration.calibration_manager import CalibrationManager
 from models import Point2D
+
+logger = logging.getLogger('ams.object')
 from .object_detection import (
     ObjectDetector,
     DetectedObject,
@@ -464,13 +467,13 @@ class ObjectDetectionBackend(DetectionBackend):
             from calibration.pattern_detector import ArucoPatternDetector
             from calibration.homography import compute_homography
         except ImportError as e:
-            print(f"Calibration dependencies not available: {e}")
+            logger.warning(f"Calibration dependencies not available: {e}")
             import traceback
             traceback.print_exc()
             return self._return_no_calibration()
 
         if display_surface is None or display_resolution is None:
-            print("No display surface provided, skipping geometric calibration")
+            logger.warning("No display surface provided, skipping geometric calibration")
             return self._return_no_calibration()
 
         print("\n" + "="*60)
@@ -636,12 +639,12 @@ class ObjectDetectionBackend(DetectionBackend):
             # Save calibration
             calib_path = "calibration.json"
             calibration_data.save(calib_path)
-            print(f"Calibration saved to {calib_path}")
+            logger.info(f"Calibration saved to {calib_path}")
 
             # Update calibration manager if available
             if self.calibration_manager:
                 self.calibration_manager.load_calibration(calib_path)
-                print("Calibration manager updated")
+                logger.debug("Calibration manager updated")
 
             return CalibrationResult(
                 success=True,
@@ -653,7 +656,7 @@ class ObjectDetectionBackend(DetectionBackend):
             )
 
         except Exception as e:
-            print(f"ERROR during calibration: {e}")
+            logger.error(f"Calibration failed: {e}")
             import traceback
             traceback.print_exc()
             return self._return_no_calibration()

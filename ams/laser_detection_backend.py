@@ -20,6 +20,7 @@ Use this backend to:
 """
 
 from typing import List, Optional, Tuple
+import logging
 import time
 import numpy as np
 import cv2
@@ -27,6 +28,8 @@ import cv2
 from ams.detection_backend import DetectionBackend
 from ams.events import PlaneHitEvent, CalibrationResult
 from ams.camera import CameraInterface
+
+logger = logging.getLogger('ams.laser')
 
 # Try to import calibration manager - may not be available in all setups
 try:
@@ -94,10 +97,10 @@ class LaserDetectionBackend(DetectionBackend):
         self.debug_frame: Optional[np.ndarray] = None
         self.debug_targets: List[Tuple[float, float, float, tuple]] = []  # (x, y, radius, color) in normalized coords
 
-        print(f"LaserDetectionBackend initialized")
-        print(f"  Camera resolution: {camera.get_resolution()}")
-        print(f"  Brightness threshold: {brightness_threshold}")
-        print(f"  Latency: {self.detection_latency_ms}ms")
+        logger.info(f"LaserDetectionBackend initialized")
+        logger.info(f"  Camera resolution: {camera.get_resolution()}")
+        logger.info(f"  Brightness threshold: {brightness_threshold}")
+        logger.debug(f"  Latency: {self.detection_latency_ms}ms")
 
     def update(self, dt: float):
         """
@@ -328,13 +331,13 @@ class LaserDetectionBackend(DetectionBackend):
             from calibration.pattern_detector import ArucoPatternDetector
             from calibration.homography import compute_homography
         except ImportError as e:
-            print(f"Calibration dependencies not available: {e}")
+            logger.warning(f"Calibration dependencies not available: {e}")
             import traceback
             traceback.print_exc()
             return self._return_no_calibration()
 
         if display_surface is None or display_resolution is None:
-            print("No display surface provided, skipping geometric calibration")
+            logger.warning("No display surface provided, skipping geometric calibration")
             return self._return_no_calibration()
 
         print("\n" + "="*60)

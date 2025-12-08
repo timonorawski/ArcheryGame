@@ -1,8 +1,8 @@
 # New Game Quickstart Guide
 
-This guide walks you through creating a new game for the AMS platform. Games are auto-discovered, so once you follow this structure, your game will automatically appear in `ams_game.py --list-games`.
+This guide walks you through creating a new game for the AMS platform. Games are auto-discovered by the registry when they inherit from `BaseGame`.
 
-## Quick Start (5 minutes)
+## Quick Start
 
 ### 1. Create Game Directory
 
@@ -12,7 +12,7 @@ mkdir -p games/MyGame/input/sources
 
 ### 2. Set Up Input Abstraction
 
-The platform provides a common input module at `games/common/input/`. Create re-export files to use it:
+Create re-export files to use the common input module:
 
 **games/MyGame/input/__init__.py:**
 ```python
@@ -55,79 +55,93 @@ from games.common.input.sources.mouse import MouseInputSource
 __all__ = ['MouseInputSource']
 ```
 
-This approach:
-- Uses the shared, validated input code from `games/common/input/`
-- Maintains backward compatibility with game-specific imports
-- Ensures consistent input handling across all games
+### 3. Create game_mode.py (The Game Class)
 
-### 3. Create Required Files
-
-Your game needs these files:
-
-```
-games/MyGame/
-├── __init__.py          # Empty or package docstring
-├── game_info.py         # Game metadata + factory function (REQUIRED)
-├── game_mode.py         # Game logic (REQUIRED)
-├── config.py            # Configuration
-├── .env                 # Default settings
-├── main.py              # Standalone entry point
-└── input/               # Copied from step 2
-```
-
-### 4. Create game_info.py
-
-This is the key file for auto-discovery:
+**This is the key file.** Your game class inherits from `BaseGame` and declares all metadata as class attributes:
 
 ```python
-"""MyGame - Game Info"""
+"""MyGame - A fun target game."""
+from typing import List, Optional, Tuple
 
-NAME = "My Game"
-DESCRIPTION = "A short description of my game."
-VERSION = "1.0.0"
-AUTHOR = "Your Name"
-
-def get_game_mode(**kwargs):
-    """Factory function to create game instance."""
-    from games.MyGame.game_mode import MyGameMode
-    return MyGameMode(**kwargs)
-```
-
-### 5. Create game_mode.py
-
-Your game mode must use the common `GameState` enum and implement the required interface:
-
-```python
-from typing import List
 import pygame
 
-from games.common import GameState  # REQUIRED: Use the common GameState
-from games.common.palette import GamePalette  # Optional: For CV-compatible colors
+from games.common import BaseGame, GameState
 
 
-class MyGameMode:
-    """Your game mode class.
+class MyGameMode(BaseGame):
+    """My awesome game.
 
-    Must implement: state property, get_score(), handle_input(), update(), render()
+    Inherits from BaseGame which provides:
+    - Automatic state management (state property)
+    - Palette support (_palette, cycle_palette, set_palette)
+    - Quiver/ammo support (_quiver, _use_shot, _start_retrieval, etc.)
+    - Base CLI arguments (--palette, --quiver-size, --retrieval-pause)
     """
+
+    # =========================================================================
+    # Game Metadata (used by registry for auto-discovery)
+    # =========================================================================
+
+    NAME = "My Game"
+    DESCRIPTION = "A short description of my game."
+    VERSION = "1.0.0"
+    AUTHOR = "Your Name"
+
+    # Game-specific CLI arguments (base args added automatically)
+    ARGUMENTS = [
+        {
+            'name': '--difficulty',
+            'type': str,
+            'default': 'normal',
+            'choices': ['easy', 'normal', 'hard'],
+            'help': 'Game difficulty level'
+        },
+        {
+            'name': '--time-limit',
+            'type': int,
+            'default': 60,
+            'help': 'Time limit in seconds (0=unlimited)'
+        },
+    ]
+
+    # =========================================================================
+    # Initialization
+    # =========================================================================
 
     def __init__(
         self,
-        color_palette=None,      # AMS-provided colors for CV compatibility
-        palette_name=None,       # Test palette name for standalone mode
-        **kwargs,
+        difficulty: str = 'normal',
+        time_limit: int = 60,
+        **kwargs,  # Pass palette, quiver args to BaseGame
     ):
-        self._game_state = GameState.PLAYING  # Use common GameState
-        self._score = 0
-        self._palette = GamePalette(colors=color_palette, palette_name=palette_name)
-        # Initialize your game state
+        # IMPORTANT: Call super().__init__ to set up palette and quiver
+        super().__init__(**kwargs)
 
-    @property
-    def state(self) -> GameState:
-        """Return current state using common GameState enum."""
-        return self._game_state
+        # Game-specific initialization
+        self._difficulty = difficulty
+        self._time_limit = time_limit
+        self._score = 0
+        self._game_over = False
+
+    # =========================================================================
+    # Required: Internal State (override from BaseGame)
+    # =========================================================================
+
+    def _get_internal_state(self) -> GameState:
+        """Map internal state to standard GameState.
+
+        BaseGame.state property calls this and handles RETRIEVAL automatically.
+        """
+        if self._game_over:
+            return GameState.GAME_OVER
+        return GameState.PLAYING
+
+    # =========================================================================
+    # Required: Game Interface
+    # =========================================================================
 
     def get_score(self) -> int:
+        """Return current score."""
         return self._score
 
     def handle_input(self, events: List) -> None:
@@ -135,415 +149,279 @@ class MyGameMode:
         for event in events:
             x, y = event.position.x, event.position.y
             # Handle the input at (x, y)
+            # Example: check if hit a target, update score, etc.
 
     def update(self, dt: float) -> None:
         """Update game logic. dt is seconds since last frame."""
+        # Update game state, timers, entities, etc.
         pass
 
     def render(self, screen: pygame.Surface) -> None:
         """Draw game to screen."""
+        # Use self._palette for CV-compatible colors
         bg_color = self._palette.get_background_color()
         screen.fill(bg_color)
-        # Draw your game elements using self._palette colors
 
-    # Optional: Palette cycling for standalone testing
-    def cycle_palette(self) -> str:
-        return self._palette.cycle_palette()
+        # Draw your game elements
+        # target_color = self._palette.get_target_color(index)
+        # ui_color = self._palette.get_ui_color()
 ```
 
-**Important:** All games MUST use `from games.common import GameState`. Do NOT define your own GameState enum.
+### 4. Create game_info.py (Factory Function)
 
-### 6. Create config.py
+The factory function bridges CLI args to your game class:
 
+```python
+"""MyGame - Game Info"""
+
+
+def get_game_mode(**kwargs):
+    """Factory function to create game instance.
+
+    The registry calls this with CLI arguments.
+    """
+    from games.MyGame.game_mode import MyGameMode
+    return MyGameMode(**kwargs)
+```
+
+**Note:** With BaseGame, metadata (NAME, DESCRIPTION, etc.) and ARGUMENTS come from the class itself. The game_info.py only needs the factory function.
+
+### 5. Create Supporting Files
+
+**games/MyGame/__init__.py:**
+```python
+"""MyGame package."""
+```
+
+**games/MyGame/config.py:**
 ```python
 """Configuration for MyGame."""
 import os
 from pathlib import Path
-
 from dotenv import load_dotenv
 
 # Load .env from game directory
 _env_path = Path(__file__).parent / '.env'
 load_dotenv(_env_path)
 
-
-def _get_bool(key: str, default: bool) -> bool:
-    """Get boolean from environment."""
-    val = os.getenv(key, str(default)).lower()
-    return val in ('true', '1', 'yes')
-
-
 def _get_int(key: str, default: int) -> int:
-    """Get integer from environment."""
     return int(os.getenv(key, str(default)))
 
-
-def _get_float(key: str, default: float) -> float:
-    """Get float from environment."""
-    return float(os.getenv(key, str(default)))
-
-
-# Display settings
+# Display settings (set by registry before game creation)
 SCREEN_WIDTH = _get_int('SCREEN_WIDTH', 1280)
 SCREEN_HEIGHT = _get_int('SCREEN_HEIGHT', 720)
 
 # Add your game-specific settings here
-# Example:
-# TARGET_SIZE = _get_int('TARGET_SIZE', 50)
-# SPAWN_RATE = _get_float('SPAWN_RATE', 1.5)
-# DEBUG_MODE = _get_bool('DEBUG_MODE', False)
 ```
 
-### 7. Create .env
-
+**games/MyGame/.env:**
 ```env
 # MyGame Configuration
 SCREEN_WIDTH=1280
 SCREEN_HEIGHT=720
-# Add your game-specific defaults
-```
-
-### 8. Create main.py (Standalone Entry)
-
-```python
-#!/usr/bin/env python3
-"""MyGame - Standalone entry point."""
-
-import pygame
-import sys
-import os
-
-# Add project root to path
-_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if _root not in sys.path:
-    sys.path.insert(0, _root)
-
-from games.common import GameState  # Use common GameState
-from games.MyGame.game_mode import MyGameMode
-from games.MyGame.input.input_manager import InputManager
-from games.MyGame.input.sources.mouse import MouseInputSource
-from games.MyGame.config import SCREEN_WIDTH, SCREEN_HEIGHT
-
-def main():
-    pygame.init()
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption("My Game")
-
-    input_manager = InputManager(MouseInputSource())
-    game = MyGameMode()
-    clock = pygame.time.Clock()
-
-    running = True
-    while running:
-        dt = clock.tick(60) / 1000.0
-        input_manager.update(dt)
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-
-        events = input_manager.get_events()
-        game.handle_input(events)
-        game.update(dt)
-        game.render(screen)
-        pygame.display.flip()
-
-        if game.state == GameState.GAME_OVER:
-            print(f"Game Over! Score: {game.get_score()}")
-            running = False
-
-    pygame.quit()
-    return 0
-
-if __name__ == "__main__":
-    sys.exit(main())
-```
-
-### 9. Create __init__.py
-
-```python
-"""MyGame package."""
 ```
 
 ## Running Your Game
 
-### Standalone (Development)
+### Development Mode (Recommended)
 ```bash
-python games/MyGame/main.py
+# List all games and their options
+python dev_game.py --list
+
+# See game-specific options
+python dev_game.py mygame --help
+
+# Play with options
+python dev_game.py mygame --difficulty hard --time-limit 120
 ```
 
-### With AMS
+### With AMS (Production)
 ```bash
-# Verify it appears
-python ams_game.py --list-games
-
-# Play with mouse
+# Play with mouse backend
 python ams_game.py --game mygame --backend mouse
 
 # Play with laser pointer
 python ams_game.py --game mygame --backend laser --fullscreen
 ```
 
-## Game Protocol Reference
+## BaseGame Reference
 
-### Required Interface
+### Class Attributes (Metadata)
 
-Your game mode class MUST have:
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `NAME` | str | Display name |
+| `DESCRIPTION` | str | Short description |
+| `VERSION` | str | Semantic version |
+| `AUTHOR` | str | Author/team |
+| `ARGUMENTS` | list | CLI argument definitions |
 
-| Method/Property | Signature | Description |
-|-----------------|-----------|-------------|
-| `state` | `@property -> GameState` | Current game state |
-| `get_score()` | `() -> int` | Current score |
-| `handle_input(events)` | `(List[InputEvent]) -> None` | Process input |
+### Base Arguments (Automatic)
+
+These are automatically available to all games via `BaseGame._BASE_ARGUMENTS`:
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `--palette` | str | Test palette name |
+| `--quiver-size` | int | Shots before retrieval |
+| `--retrieval-pause` | int | Seconds for retrieval |
+
+### Required Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `_get_internal_state()` | `-> GameState` | Map to standard state |
+| `get_score()` | `-> int` | Current score |
+| `handle_input(events)` | `(List) -> None` | Process inputs |
 | `update(dt)` | `(float) -> None` | Update logic |
-| `render(screen)` | `(pygame.Surface) -> None` | Draw game |
+| `render(screen)` | `(Surface) -> None` | Draw game |
 
-### InputEvent Structure
+### Built-in Features
 
+**Palette Support:**
 ```python
-class InputEvent:
-    position: Vector2D  # .x and .y in pixels
-    timestamp: float    # Time of event
-    event_type: EventType  # HIT or MISS
+# In render():
+bg = self._palette.get_background_color()
+color = self._palette.get_target_color(0)
+ui = self._palette.get_ui_color()
+
+# Standalone testing:
+self.cycle_palette()  # Returns new palette name
+self.set_palette('bw')
 ```
 
-### GameState Enum (Common)
+**Quiver/Ammo Support:**
+```python
+# In handle_input():
+if self._use_shot():  # Returns True when empty
+    self._start_retrieval()
 
-**All games MUST use the common GameState enum.** Do NOT define your own.
+# In update():
+if self._in_retrieval:
+    if self._update_retrieval(dt):  # Returns True when done
+        self._end_retrieval()
+
+# Display:
+remaining = self.shots_remaining  # None if unlimited
+```
+
+### GameState Enum
 
 ```python
 from games.common import GameState
 
-# Available states:
 class GameState(Enum):
     PLAYING = "playing"      # Active gameplay
     PAUSED = "paused"        # Game paused
-    RETRIEVAL = "retrieval"  # Retrieving ammo (quiver system)
+    RETRIEVAL = "retrieval"  # Retrieving ammo
     GAME_OVER = "game_over"  # Loss condition
     WON = "won"              # Win condition
 ```
 
-### Internal State Pattern (Complex Games)
+### Internal State Pattern
 
-For games with complex state machines, use an internal state enum that maps to the standard GameState:
+For complex state machines, use a private enum:
 
 ```python
 from enum import Enum, auto
-from games.common import GameState
+from games.common import BaseGame, GameState
+
 
 class _InternalState(Enum):
-    """Internal states specific to your game."""
     WAITING = auto()
-    ACTIVE = auto()
+    PLAYING = auto()
     ROUND_OVER = auto()
     COMPLETE = auto()
 
-class MyGameMode:
-    def __init__(self):
+
+class MyGameMode(BaseGame):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self._internal_state = _InternalState.WAITING
 
-    @property
-    def state(self) -> GameState:
-        """Map internal state to standard GameState."""
-        if self._internal_state == _InternalState.COMPLETE:
-            return GameState.WON
-        elif self._internal_state == _InternalState.ROUND_OVER:
-            return GameState.GAME_OVER
-        else:
-            return GameState.PLAYING
+    def _get_internal_state(self) -> GameState:
+        mapping = {
+            _InternalState.WAITING: GameState.PLAYING,
+            _InternalState.PLAYING: GameState.PLAYING,
+            _InternalState.ROUND_OVER: GameState.GAME_OVER,
+            _InternalState.COMPLETE: GameState.WON,
+        }
+        return mapping[self._internal_state]
 ```
 
-This pattern allows rich internal state management while presenting a consistent interface to the AMS platform.
-
-## Adding CLI Arguments
-
-To add game-specific command-line arguments, define them in `game_info.py`:
+## CLI Arguments Format
 
 ```python
 ARGUMENTS = [
     {
-        'name': '--difficulty',
-        'type': str,
-        'default': 'normal',
-        'help': 'Game difficulty (easy, normal, hard)'
+        'name': '--my-option',      # CLI flag (required)
+        'type': str,                # str, int, float (required)
+        'default': 'value',         # Default value (required)
+        'help': 'Description',      # Help text (required)
+        'choices': ['a', 'b'],      # Optional: valid values
     },
     {
-        'name': '--time-limit',
-        'type': int,
-        'default': None,
-        'help': 'Time limit in seconds'
+        'name': '--flag',
+        'action': 'store_true',     # For boolean flags
+        'default': False,
+        'help': 'Enable feature',
     },
 ]
-
-def get_game_mode(**kwargs):
-    difficulty = kwargs.get('difficulty', 'normal')
-    time_limit = kwargs.get('time_limit')
-    return MyGameMode(difficulty=difficulty, time_limit=time_limit)
 ```
 
-Note: You'll need to add these arguments to `ams_game.py` parser as well for them to work via CLI.
-
-## Design Considerations for Multi-Device Support
-
-The AMS platform supports many input devices with vastly different characteristics. **All games must be designed with this in mind.**
-
-### Input Device Speed Variance
-
-| Device | Cycle Time | Notes |
-|--------|------------|-------|
-| Laser Pointer | instant | Continuous pointing |
-| Nerf Blaster | ~0.3s | Rapid fire |
-| Foam Balls | ~1s | Throw and retrieve |
-| Darts | ~2s | Aim, throw, retrieve |
-| Archery | 3-8s | Nock, draw, aim, release |
-
-**Required:** All timing parameters (spawn rates, target duration, combo windows) must be configurable to accommodate any device speed.
-
-### Physical Resource Constraints (Quiver/Ammo)
-
-Some devices have limited ammunition requiring retrieval:
-
-| Device | Typical Capacity |
-|--------|------------------|
-| Archery | 3-12 arrows |
-| Darts | 3-6 darts |
-| Nerf (magazine) | 6-30 darts |
-
-**Consider implementing:**
-
-- `--quiver-size N` - Limit shots per round, then pause for retrieval
-- `--retrieval-pause N` - Seconds between rounds (or manual "ready" signal)
-- Round-based play structure matching physical ammo capacity
+## Multi-Device Design
 
 ### Pacing Presets
 
-Rather than "difficulty levels", consider **pacing presets** that adjust all timing parameters together:
+All games should support `--pacing` for device speed:
 
 ```python
-PACING_PRESETS = {
-    'archery': {
-        'spawn_interval': 5.0,
-        'target_duration': 6.0,
-        'combo_window': 8.0,  # Long enough for draw-aim-release-retrieve
-        'max_simultaneous': 2,
+ARGUMENTS = [
+    {
+        'name': '--pacing',
+        'type': str,
+        'default': 'throwing',
+        'choices': ['archery', 'throwing', 'blaster'],
+        'help': 'Device speed preset'
     },
-    'throwing': {
-        'spawn_interval': 2.0,
-        'target_duration': 4.0,
-        'combo_window': 3.0,
-        'max_simultaneous': 4,
-    },
-    'blaster': {
-        'spawn_interval': 0.75,
-        'target_duration': 2.5,
-        'combo_window': 1.5,
-        'max_simultaneous': 6,
-    },
-}
+]
 ```
 
-### Key Design Questions
+| Preset | Cycle Time | Use Case |
+|--------|------------|----------|
+| archery | 3-8s | Bows, slow throwing |
+| throwing | 1-2s | Darts, balls |
+| blaster | 0.3s | Nerf, laser |
 
-When designing a new game, ask:
+### Design Questions
 
-1. **Does timing scale?** Can an archer complete the core loop in time?
+1. **Does timing scale?** Can an archer complete the core loop?
 2. **Is ammo considered?** What happens when arrows run out?
-3. **Are pauses handled?** Retrieval time shouldn't end the game
-4. **Does combo/streak logic account for slow devices?** 8+ second windows for archery
-
-## Tips
-
-### Development Workflow
-1. Start with standalone mode (`python games/MyGame/main.py`)
-2. Get game mechanics working with mouse
-3. Test with AMS mouse backend (`ams_game.py --game mygame --backend mouse`)
-4. Test with laser/object backends when ready
-
-### Configuration Best Practices
-- Put all tunable values in `.env`
-- Use `config.py` to load and validate
-- Support command-line overrides for testing
-
-### Input Handling
-- `event.position.x` and `event.position.y` are pixel coordinates
-- Check collision using distance or bounds
-- Events are already filtered to valid screen positions
-
-## Common Input Module
-
-The shared input module at `games/common/input/` provides:
-
-### InputEvent (Pydantic Model)
-
-```python
-from games.common.input import InputEvent
-
-class InputEvent(BaseModel):
-    position: Vector2D    # .x and .y in screen pixels
-    timestamp: float      # time.monotonic() when event occurred
-    event_type: EventType # HIT or MISS (default: HIT)
-```
-
-- **Immutable** (frozen Pydantic model)
-- **Validated** (timestamp must be non-negative)
-- Works with all input backends (mouse, laser, object detection)
-
-### InputManager
-
-```python
-from games.common.input import InputManager
-from games.common.input.sources import MouseInputSource
-
-manager = InputManager(MouseInputSource())
-
-# In game loop:
-manager.update(dt)           # Collect events from source
-events = manager.get_events() # Get collected events
-```
-
-### InputSource (Abstract Base)
-
-All input backends implement this interface:
-
-```python
-class InputSource(ABC):
-    def update(self, dt: float) -> None:
-        """Update source, collecting events."""
-        pass
-
-    def poll_events(self) -> List[InputEvent]:
-        """Return collected events since last poll."""
-        pass
-```
-
-Built-in sources:
-- `MouseInputSource` - Development/testing with mouse clicks
+3. **Are pauses handled?** Retrieval shouldn't end the game
+4. **Do combos work?** 8+ second windows for archery
 
 ## Example Games
 
-Study these existing games for reference:
-
-- **BalloonPop** (`games/BalloonPop/`) - Simple, clean example
-- **Containment** (`games/Containment/`) - Internal state pattern, physics, deflector geometry
-- **Grouping** (`games/Grouping/`) - Multiple game modes, precision training, endless game
-- **ManyTargets** (`games/ManyTargets/`) - Complex internal state machine, target field clearance
-- **DuckHunt** (`games/DuckHunt/`) - More complex with modes and trajectories
+| Game | Notable Features |
+|------|------------------|
+| BalloonPop | Simple BaseGame example |
+| Containment | Physics, geometry, tempo presets |
+| Grouping | Endless mode, precision training |
+| ManyTargets | Complex internal states |
+| FruitSlice | Arcing targets, bombs |
+| GrowingTargets | Score-vs-difficulty tradeoff |
+| DuckHunt | Multiple modes, trajectories |
 
 ## Troubleshooting
 
-### Game doesn't appear in --list-games
-- Ensure `game_info.py` exists
-- Check for import errors: `python -c "from games.MyGame.game_info import *"`
+### Game not discovered
+- Ensure `game_mode.py` has a class inheriting from `BaseGame`
+- Check for import errors: `python -c "from games.MyGame.game_mode import *"`
 
-### Import errors when running
-- Check path setup in `main.py`
-- Use full package paths: `from games.MyGame.module import ...`
+### Arguments not showing
+- Verify `ARGUMENTS` is a class attribute (not instance)
+- Check format matches the examples above
 
-### Input not working
-- Verify `input/` re-export files import from `games.common.input`
-- Check `input_manager.update(dt)` is called each frame
-- Verify `input_manager.get_events()` returns events
-- Test imports: `python -c "from games.MyGame.input import InputManager"`
+### State not updating
+- Ensure `_get_internal_state()` returns correct `GameState`
+- BaseGame handles RETRIEVAL automatically

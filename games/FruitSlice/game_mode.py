@@ -11,8 +11,8 @@ import pygame
 
 from models import Vector2D
 from games.common import GameState
+from games.common.base_game import BaseGame
 from games.common.input import InputEvent
-from games.common.palette import GamePalette
 from games.FruitSlice import config
 from games.FruitSlice.target import ArcingTarget, TargetType
 from games.FruitSlice.spawner import TargetSpawner
@@ -66,7 +66,7 @@ class ComboTracker:
         return self.multiplier > 1
 
 
-class FruitSliceMode:
+class FruitSliceMode(BaseGame):
     """FruitSlice game mode - hit arcing targets, avoid bombs.
 
     Features:
@@ -76,6 +76,87 @@ class FruitSliceMode:
     - Quiver mode for physical ammo constraints
     - Pacing presets for different input devices
     """
+
+    # Game metadata (class attributes for BaseGame)
+    NAME = "Fruit Slice"
+    DESCRIPTION = "Hit arcing targets for points, avoid bombs. Pacing adapts to your input device."
+    VERSION = "1.0.0"
+    AUTHOR = "AMS Team"
+
+    # CLI arguments (class attribute for BaseGame)
+    ARGUMENTS = [
+        # Game mode
+        {
+            'name': '--mode',
+            'type': str,
+            'default': 'classic',
+            'help': 'Game mode: classic, zen (no bombs), arcade (timed)'
+        },
+        # Pacing preset
+        {
+            'name': '--pacing',
+            'type': str,
+            'default': 'throwing',
+            'help': 'Pacing preset: archery (slow), throwing (medium), blaster (fast)'
+        },
+        # Timing overrides
+        {
+            'name': '--spawn-interval',
+            'type': float,
+            'default': None,
+            'help': 'Seconds between spawns (overrides preset)'
+        },
+        {
+            'name': '--arc-duration',
+            'type': float,
+            'default': None,
+            'help': 'How long targets stay on screen (overrides preset)'
+        },
+        {
+            'name': '--max-targets',
+            'type': int,
+            'default': None,
+            'help': 'Maximum simultaneous targets (overrides preset)'
+        },
+        {
+            'name': '--target-size',
+            'type': int,
+            'default': None,
+            'help': 'Base target radius in pixels (overrides preset)'
+        },
+        # Game rules
+        {
+            'name': '--lives',
+            'type': int,
+            'default': 3,
+            'help': 'Starting lives'
+        },
+        {
+            'name': '--time-limit',
+            'type': int,
+            'default': None,
+            'help': 'Time limit in seconds (arcade mode)'
+        },
+        {
+            'name': '--no-bombs',
+            'action': 'store_true',
+            'default': False,
+            'help': 'Disable bombs (zen mode)'
+        },
+        {
+            'name': '--bomb-ratio',
+            'type': float,
+            'default': None,
+            'help': 'Fraction of spawns that are bombs (0.0-1.0)'
+        },
+        # Combo
+        {
+            'name': '--combo-window',
+            'type': float,
+            'default': None,
+            'help': 'Seconds before combo resets (longer for slow devices)'
+        },
+    ]
 
     def __init__(
         self,
@@ -89,11 +170,7 @@ class FruitSliceMode:
         no_bombs: bool = False,
         lives: int = 3,
         time_limit: Optional[int] = None,
-        quiver_size: Optional[int] = None,
-        retrieval_pause: int = 30,
         combo_window: Optional[float] = None,
-        color_palette: Optional[List[tuple]] = None,
-        palette_name: Optional[str] = None,
         **kwargs,
     ):
         """Initialize FruitSlice game.
@@ -109,26 +186,17 @@ class FruitSliceMode:
             no_bombs: Disable bombs (zen mode)
             lives: Starting lives
             time_limit: Time limit in seconds (arcade mode)
-            quiver_size: Shots per round before retrieval (None = unlimited)
-            retrieval_pause: Seconds for retrieval between rounds
             combo_window: Override combo window duration
-            color_palette: Optional list of RGB colors from AMS calibration
-            palette_name: Optional test palette name (for standalone mode)
+            **kwargs: Passed to BaseGame (color_palette, palette_name, quiver_size, retrieval_pause)
         """
+        # Initialize BaseGame (handles palette and quiver setup)
+        super().__init__(**kwargs)
+
         # Mode settings
         self._mode = mode
         self._no_bombs = no_bombs or mode == 'zen'
         self._time_limit = time_limit
         self._max_lives = lives
-
-        # Quiver settings
-        self._quiver_size = quiver_size
-        self._retrieval_pause = retrieval_pause
-        self._shots_this_round = 0
-        self._current_round = 1
-
-        # Palette settings
-        self._palette = GamePalette(colors=color_palette, palette_name=palette_name)
 
         # Get combo window from preset if not specified
         if combo_window is None:
@@ -141,7 +209,7 @@ class FruitSliceMode:
         self._screen_height = config.SCREEN_HEIGHT
 
         # Game state
-        self._state = GameState.PLAYING
+        self._internal_state = GameState.PLAYING
         self._score = 0
         self._lives = lives
         self._targets: List[ArcingTarget] = []
@@ -167,7 +235,6 @@ class FruitSliceMode:
 
         # Timing
         self._start_time = time.monotonic()
-        self._retrieval_start_time: Optional[float] = None
 
         # Visual effects
         self._hit_effects: List[dict] = []
@@ -177,10 +244,12 @@ class FruitSliceMode:
         self._session_best = 0
         self._games_played = 0
 
-    @property
-    def state(self) -> GameState:
-        """Current game state."""
-        return self._state
+        # Round tracking (for quiver mode)
+        self._current_round = 1
+
+    def _get_internal_state(self) -> GameState:
+        """Map internal game state to standard GameState."""
+        return self._internal_state
 
     def get_score(self) -> int:
         """Get current score."""
@@ -208,12 +277,11 @@ class FruitSliceMode:
             self._session_best = self._score
         self._games_played += 1
 
-        self._state = GameState.PLAYING
+        self._internal_state = GameState.PLAYING
         self._score = 0
         self._lives = self._max_lives
         self._targets = []
         self._escaped_count = 0
-        self._shots_this_round = 0
         self._current_round = 1
 
         self._hits = 0
@@ -232,18 +300,12 @@ class FruitSliceMode:
         self._hit_effects = []
         self._bomb_effects = []
 
-    def _start_retrieval(self) -> None:
-        """Enter retrieval pause state."""
-        self._state = GameState.RETRIEVAL
-        self._retrieval_start_time = time.monotonic()
-        self._targets = []  # Clear remaining targets
+        # Reset BaseGame state
+        super().reset()
 
-    def _end_retrieval(self) -> None:
-        """End retrieval pause, start new round."""
-        self._state = GameState.PLAYING
-        self._shots_this_round = 0
+    def _handle_retrieval_end(self) -> None:
+        """Handle end of retrieval - start new round."""
         self._current_round += 1
-        self._retrieval_start_time = None
 
         # Increase difficulty for new round
         if self._spawner:
@@ -260,14 +322,15 @@ class FruitSliceMode:
         Checks ALL targets that overlap with the hit position.
         Hitting multiple targets with one shot gives a multi-hit bonus!
         """
-        if self._state == GameState.GAME_OVER:
+        if self._internal_state == GameState.GAME_OVER:
             self._restart()
             return
 
-        if self._state == GameState.RETRIEVAL:
+        if self.state == GameState.RETRIEVAL:
             # Any click ends retrieval (manual ready)
-            if self._retrieval_pause == 0:
-                self._end_retrieval()
+            if self._quiver and self._quiver.retrieval_pause == 0:
+                super()._end_retrieval()
+                self._handle_retrieval_end()
             return
 
         # Check ALL targets that overlap with hit position
@@ -292,7 +355,7 @@ class FruitSliceMode:
             })
 
             if self._lives <= 0:
-                self._state = GameState.GAME_OVER
+                self._internal_state = GameState.GAME_OVER
 
         # Process fruit hits (can hit multiple!)
         elif hit_targets:
@@ -354,21 +417,22 @@ class FruitSliceMode:
             self._misses += 1
 
         # Track shots for quiver mode
-        self._shots_this_round += 1
-        if self._quiver_size and self._shots_this_round >= self._quiver_size:
-            self._start_retrieval()
+        if self._use_shot():
+            # Quiver empty, start retrieval
+            super()._start_retrieval()
+            self._targets = []  # Clear remaining targets
 
     def update(self, dt: float) -> None:
         """Update game state."""
-        if self._state == GameState.GAME_OVER:
+        if self._internal_state == GameState.GAME_OVER:
             return
 
-        if self._state == GameState.RETRIEVAL:
+        if self.state == GameState.RETRIEVAL:
             # Check if auto-resume timer expired
-            if self._retrieval_pause > 0 and self._retrieval_start_time:
-                elapsed = time.monotonic() - self._retrieval_start_time
-                if elapsed >= self._retrieval_pause:
-                    self._end_retrieval()
+            if self._update_retrieval(dt):
+                # Retrieval complete
+                super()._end_retrieval()
+                self._handle_retrieval_end()
             return
 
         self._ensure_spawner()
@@ -394,7 +458,7 @@ class FruitSliceMode:
                         self._lives -= 1
                         self._escaped_count = 0
                         if self._lives <= 0:
-                            self._state = GameState.GAME_OVER
+                            self._internal_state = GameState.GAME_OVER
                 target.hit = True  # Mark as done
 
         # Remove inactive targets
@@ -408,7 +472,7 @@ class FruitSliceMode:
         if self._time_limit:
             elapsed = time.monotonic() - self._start_time
             if elapsed >= self._time_limit:
-                self._state = GameState.GAME_OVER
+                self._internal_state = GameState.GAME_OVER
 
         # Clean up old effects
         now = time.monotonic()
@@ -434,11 +498,11 @@ class FruitSliceMode:
         self._render_hud(screen)
 
         # Draw retrieval screen
-        if self._state == GameState.RETRIEVAL:
+        if self.state == GameState.RETRIEVAL:
             self._render_retrieval(screen)
 
         # Draw game over
-        if self._state == GameState.GAME_OVER:
+        if self._internal_state == GameState.GAME_OVER:
             self._render_game_over(screen)
 
     def _render_targets(self, screen: pygame.Surface) -> None:
@@ -591,9 +655,9 @@ class FruitSliceMode:
             screen.blit(text, text_rect)
 
         # Quiver info (if in quiver mode)
-        if self._quiver_size:
-            remaining = self._quiver_size - self._shots_this_round
-            quiver_text = f"Arrows: {remaining}/{self._quiver_size}  Round: {self._current_round}"
+        if self.quiver_size:
+            remaining = self.shots_remaining
+            quiver_text = f"Arrows: {remaining}/{self.quiver_size}  Round: {self._current_round}"
             text = font_medium.render(quiver_text, True, (150, 200, 255))
             screen.blit(text, (self._screen_width - text.get_width() - 20, 20))
 
@@ -642,9 +706,8 @@ class FruitSliceMode:
         y += 50
 
         # Countdown or manual prompt
-        if self._retrieval_pause > 0 and self._retrieval_start_time:
-            elapsed = time.monotonic() - self._retrieval_start_time
-            remaining = max(0, self._retrieval_pause - elapsed)
+        if self._quiver and self._quiver.retrieval_pause > 0:
+            remaining = self._quiver.retrieval_timer
             text = font_medium.render(f"Next round in {remaining:.0f}s...", True, (150, 150, 150))
         else:
             text = font_medium.render("Click when ready to continue", True, (150, 255, 150))
@@ -698,35 +761,7 @@ class FruitSliceMode:
         text = font_small.render("Click to play again", True, (150, 150, 150))
         screen.blit(text, (center_x - text.get_width() // 2, y + 30))
 
-    def set_palette(self, palette_name: str) -> str:
-        """Switch to a named test palette.
-
-        Args:
-            palette_name: Name from TEST_PALETTES
-
-        Returns:
-            New palette name
-        """
-        if self._palette.set_palette(palette_name):
-            # Update spawner if it exists
-            if self._spawner:
-                self._spawner.set_fruit_colors(self._palette.get_target_colors())
-            return palette_name
-        return self._palette.name
-
-    def cycle_palette(self) -> str:
-        """Cycle to next test palette.
-
-        Returns:
-            Name of new palette
-        """
-        new_name = self._palette.cycle_palette()
-        # Update spawner if it exists
+    def _on_palette_changed(self) -> None:
+        """Update spawner colors when palette changes."""
         if self._spawner:
             self._spawner.set_fruit_colors(self._palette.get_target_colors())
-        return new_name
-
-    @property
-    def palette_name(self) -> str:
-        """Current palette name."""
-        return self._palette.name

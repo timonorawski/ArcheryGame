@@ -13,10 +13,10 @@ import pygame
 
 from models import Vector2D
 from games.common import GameState
+from games.common.base_game import BaseGame
 from games.Grouping.input.input_event import InputEvent
 from games.Grouping import config
 from games.Grouping.grouping_round import GroupingRound, GroupingMethod
-from games.common.palette import GamePalette
 
 
 class _InternalState(Enum):
@@ -26,7 +26,7 @@ class _InternalState(Enum):
     ROUND_OVER = "round_over"  # Round ended, showing results
 
 
-class GroupingMode:
+class GroupingMode(BaseGame):
     """Grouping game mode - precision training through shot grouping.
 
     The game flow:
@@ -39,14 +39,40 @@ class GroupingMode:
     Score is the smallest group diameter achieved.
     """
 
+    # Game metadata
+    NAME = "Grouping"
+    DESCRIPTION = "Precision training - shrink the target by tightening your group."
+    VERSION = "1.0.0"
+    AUTHOR = "AMS Team"
+
+    # CLI argument definitions
+    ARGUMENTS = [
+        {
+            'name': '--method',
+            'type': str,
+            'default': 'centroid',
+            'help': 'Grouping method: centroid, fixed (center+radius), or origin (fixed center, set radius)'
+        },
+        {
+            'name': '--initial-radius',
+            'type': int,
+            'default': None,
+            'help': 'Initial target radius in pixels'
+        },
+        {
+            'name': '--min-radius',
+            'type': int,
+            'default': None,
+            'help': 'Minimum target radius (smallest possible)'
+        },
+    ]
+
     def __init__(
         self,
         initial_radius: Optional[int] = None,
         min_radius: Optional[int] = None,
         group_margin: Optional[float] = None,
         method: Optional[str] = None,
-        color_palette: Optional[List[tuple]] = None,
-        palette_name: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the grouping game.
@@ -56,9 +82,10 @@ class GroupingMode:
             min_radius: Minimum target radius
             group_margin: Multiplier for group radius calculation
             method: Grouping method - 'centroid' or 'fixed_center'
-            color_palette: Optional list of RGB colors from AMS calibration
-            palette_name: Optional test palette name (for standalone mode)
         """
+        # Initialize base class (handles palette and quiver)
+        super().__init__(**kwargs)
+
         self._initial_radius = initial_radius or config.INITIAL_TARGET_RADIUS
         self._min_radius = min_radius or config.MIN_TARGET_RADIUS
         self._group_margin = group_margin or config.GROUP_MARGIN
@@ -72,9 +99,6 @@ class GroupingMode:
             self._method = GroupingMethod.FIXED_ORIGIN
         else:
             self._method = GroupingMethod.CENTROID
-
-        # Palette settings
-        self._palette = GamePalette(colors=color_palette, palette_name=palette_name)
 
         self._internal_state = _InternalState.WAITING
         self._current_round: Optional[GroupingRound] = None
@@ -95,9 +119,12 @@ class GroupingMode:
         # Start first round
         self._start_new_round()
 
-    @property
-    def state(self) -> GameState:
-        """Current game state."""
+    def _get_internal_state(self) -> GameState:
+        """Map internal state to standard GameState.
+
+        Returns:
+            GameState.PLAYING - Grouping is an endless game
+        """
         # Map internal state to standard GameState
         # Grouping is endless, so it's always PLAYING unless explicitly ended
         return GameState.PLAYING
@@ -367,29 +394,3 @@ class GroupingMode:
             text = font_small.render(inst_text, True, (150, 150, 150))
             text_rect = text.get_rect(center=(self._screen_width // 2, self._screen_height - 30))
             screen.blit(text, text_rect)
-
-    def set_palette(self, palette_name: str) -> str:
-        """Switch to a named test palette.
-
-        Args:
-            palette_name: Name from TEST_PALETTES
-
-        Returns:
-            New palette name
-        """
-        if self._palette.set_palette(palette_name):
-            return palette_name
-        return self._palette.name
-
-    def cycle_palette(self) -> str:
-        """Cycle to next test palette.
-
-        Returns:
-            Name of new palette
-        """
-        return self._palette.cycle_palette()
-
-    @property
-    def palette_name(self) -> str:
-        """Current palette name."""
-        return self._palette.name

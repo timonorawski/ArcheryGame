@@ -40,11 +40,14 @@ Usage:
 from typing import List, Optional, Dict, Any, Callable
 from datetime import datetime
 import json
+import logging
 from pathlib import Path
 
 from ams.detection_backend import DetectionBackend
 from ams.calibration import CalibrationSession
 from ams.events import PlaneHitEvent, CalibrationResult
+
+logger = logging.getLogger('ams.session')
 
 
 class AMSSession:
@@ -278,9 +281,9 @@ class AMSSession:
 
             # Restore session data
             self.session_data = loaded_data
-            print(f"Loaded existing session: {self.session_name}")
-            print(f"  Previous rounds: {loaded_data.get('rounds_completed', 0)}")
-            print(f"  Previous scores: {len(loaded_data.get('scores', []))}")
+            logger.info(f"Loaded existing session: {self.session_name}")
+            logger.debug(f"  Previous rounds: {loaded_data.get('rounds_completed', 0)}")
+            logger.debug(f"  Previous scores: {len(loaded_data.get('scores', []))}")
 
     def get_session_summary(self) -> Dict[str, Any]:
         """

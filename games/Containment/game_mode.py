@@ -10,15 +10,14 @@ import pygame
 
 from models import Vector2D
 from games.common import GameState
-from games.common.palette import GamePalette
-from games.common.quiver import QuiverState, create_quiver
+from games.common.base_game import BaseGame
 from games.Containment.ball import Ball, create_ball
 from games.Containment.deflector import DeflectorManager
 from games.Containment.gap import GapManager
 from games.Containment import config
 
 
-class ContainmentMode:
+class ContainmentMode(BaseGame):
     """Containment game mode - adversarial geometry building.
 
     Core loop:
@@ -29,6 +28,59 @@ class ContainmentMode:
     5. Ball escaping through gap = game over
     6. Survive time limit = win
     """
+
+    # Game metadata
+    NAME = "Containment"
+    DESCRIPTION = "Build walls to contain the ball. Direct hits make it faster!"
+    VERSION = "1.0.0"
+    AUTHOR = "AMS Team"
+
+    # CLI argument definitions
+    ARGUMENTS = [
+        # Pacing (standard AMS parameter)
+        {
+            'name': '--pacing',
+            'type': str,
+            'default': 'throwing',
+            'help': 'Pacing preset: archery, throwing, blaster'
+        },
+
+        # Game-specific difficulty
+        {
+            'name': '--tempo',
+            'type': str,
+            'default': 'mid',
+            'help': 'Tempo preset: zen, mid, wild (ball aggression)'
+        },
+        {
+            'name': '--ai',
+            'type': str,
+            'default': 'dumb',
+            'help': 'AI level: dumb, reactive, strategic'
+        },
+
+        # Game mode
+        {
+            'name': '--time-limit',
+            'type': int,
+            'default': 60,
+            'help': 'Seconds to survive (0 = endless)'
+        },
+        {
+            'name': '--gap-count',
+            'type': int,
+            'default': None,
+            'help': 'Number of gaps (overrides preset)'
+        },
+
+        # Physical constraints (standard AMS parameters)
+        {
+            'name': '--max-deflectors',
+            'type': int,
+            'default': None,
+            'help': 'Maximum deflectors allowed (None = unlimited)'
+        },
+    ]
 
     def __init__(
         self,
@@ -77,14 +129,16 @@ class ContainmentMode:
         self._time_limit = time_limit
         self._max_deflectors = max_deflectors
 
-        # Palette
-        self._palette = GamePalette(colors=color_palette, palette_name=palette_name)
-
         # Quiver (use preset default if not specified)
         effective_quiver = quiver_size if quiver_size is not None else self._pacing.quiver_size
-        self._quiver = create_quiver(
-            effective_quiver if effective_quiver > 0 else None,
-            retrieval_pause
+
+        # Initialize base game (handles palette and quiver)
+        super().__init__(
+            color_palette=color_palette,
+            palette_name=palette_name,
+            quiver_size=effective_quiver if effective_quiver > 0 else None,
+            retrieval_pause=retrieval_pause,
+            **kwargs,
         )
 
         # Screen dimensions (updated on first render)
@@ -103,6 +157,14 @@ class ContainmentMode:
 
         # Initialize game
         self._init_game()
+
+    def _get_internal_state(self) -> GameState:
+        """Map internal state to standard GameState (required by BaseGame).
+
+        Returns:
+            GameState.PLAYING, GameState.GAME_OVER, or GameState.WON
+        """
+        return self._state
 
     def _init_game(self) -> None:
         """Initialize or reset game entities."""
@@ -135,11 +197,6 @@ class ContainmentMode:
         self._state = GameState.PLAYING
         self._time_elapsed = 0.0
 
-    @property
-    def state(self) -> GameState:
-        """Current game state."""
-        return self._state
-
     def get_score(self) -> int:
         """Get current score (time survived in seconds)."""
         return int(self._time_elapsed)
@@ -150,11 +207,11 @@ class ContainmentMode:
         Args:
             events: List of InputEvent objects
         """
-        if self._state not in (GameState.PLAYING, GameState.RETRIEVAL):
+        if self._state not in (GameState.PLAYING,) and self.state != GameState.RETRIEVAL:
             return
 
         for event in events:
-            if self._state == GameState.RETRIEVAL:
+            if self.state == GameState.RETRIEVAL:
                 # Any input during retrieval ends it (manual ready)
                 self._end_retrieval()
                 continue
@@ -176,20 +233,8 @@ class ContainmentMode:
                 self._deflectors.add_deflector(position)
 
             # Check quiver
-            if self._quiver and self._quiver.use_shot():
+            if self._use_shot():
                 self._start_retrieval()
-
-    def _start_retrieval(self) -> None:
-        """Start retrieval pause."""
-        self._state = GameState.RETRIEVAL
-        if self._quiver:
-            self._quiver.start_retrieval()
-
-    def _end_retrieval(self) -> None:
-        """End retrieval and resume game."""
-        self._state = GameState.PLAYING
-        if self._quiver:
-            self._quiver.end_retrieval()
 
     def update(self, dt: float) -> None:
         """Update game state.
@@ -197,9 +242,10 @@ class ContainmentMode:
         Args:
             dt: Delta time in seconds since last update
         """
-        if self._state == GameState.RETRIEVAL:
+        # Handle retrieval state (BaseGame manages _in_retrieval flag)
+        if self.state == GameState.RETRIEVAL:
             # Update retrieval timer
-            if self._quiver and self._quiver.update_retrieval(dt):
+            if self._update_retrieval(dt):
                 self._end_retrieval()
             return
 
@@ -474,32 +520,13 @@ class ContainmentMode:
 
     def reset(self) -> None:
         """Reset the game."""
-        if self._quiver:
-            self._quiver.end_retrieval()
+        super().reset()  # Reset BaseGame state (quiver, retrieval)
         self._init_game()
 
-    def set_palette(self, palette_name: str) -> str:
-        """Switch to a named test palette."""
-        if self._palette.set_palette(palette_name):
-            # Update entity colors
-            if self._ball:
-                self._ball.color = self._palette.random_target_color()
-            if self._deflectors:
-                self._deflectors.default_color = self._palette.get_ui_color()
-            return palette_name
-        return self._palette.name
-
-    def cycle_palette(self) -> str:
-        """Cycle to next test palette."""
-        name = self._palette.cycle_palette()
-        # Update entity colors
+    def _on_palette_changed(self) -> None:
+        """Called when palette changes. Update entity colors."""
+        # Update entity colors when palette changes
         if self._ball:
             self._ball.color = self._palette.random_target_color()
         if self._deflectors:
             self._deflectors.default_color = self._palette.get_ui_color()
-        return name
-
-    @property
-    def palette_name(self) -> str:
-        """Current palette name."""
-        return self._palette.name

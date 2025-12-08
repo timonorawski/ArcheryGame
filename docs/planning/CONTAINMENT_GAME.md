@@ -303,27 +303,420 @@ ARGUMENTS = [
 
 ---
 
-## Open Questions
+## Playtest Feedback (December 2024)
 
-1. **Deflector shape:** Line segments? Arrow shapes? Circles?
-   - Line segments most intuitive for "wall building"
-   - Arrow shapes thematic for archery
-   - Could be configurable per theme
+**Problem:** Too easy/static. Close a few gaps and you've won. Needs more dynamism.
 
-2. **Deflector orientation:** Random? Based on shot angle? Player-controlled?
-   - Random adds chaos/adaptation requirement
-   - Shot-angle-based rewards intentional placement
-   - Start with random, add control as upgrade?
+### Proposed Redesign Ideas
 
-3. **Retrieval mechanic:** Remove deflectors during retrieval or keep them?
-   - Removing creates vulnerability (more tension)
-   - Keeping is simpler, less punishing
-   - Could be difficulty option
+#### 1. Dynamic Environment Instead of Static Walls
 
-4. **Containment win condition:** How to detect "trapped" state?
-   - Ball hasn't moved significantly for X seconds?
-   - No path to any gap exists? (computationally expensive)
-   - Defer to Phase 5, survival mode sufficient for MVP
+Replace static walls/gaps with **rotating geometric structures**:
+
+- Generatively placed polygons that rotate continuously
+- Create ever-changing gaps and openings
+- Ball must navigate through shifting geometry
+- Player can never "solve" the level permanently
+
+```
+Before (static):          After (dynamic):
+┌────────────────┐        ┌────────────────┐
+│    ████        │        │    ◇ rotating  │
+│  gap  gap      │        │  ▽     △       │
+│        ████    │        │    ○ spinning  │
+└────────────────┘        └────────────────┘
+```
+
+#### 2. Connect-the-Dots Wall Building
+
+Projectile placement creates geometry based on proximity:
+
+- **Close together (< threshold):** Forms a wall segment between them
+- **Far apart:** Just a point obstacle (circle or random small shape)
+- **Three close:** Could form a triangle enclosure
+
+This rewards intentional, strategic placement over spam.
+
+```python
+def on_hit(position):
+    nearby = find_hits_within_radius(position, CONNECT_THRESHOLD)
+    if nearby:
+        # Create wall segment(s) connecting to nearby hits
+        for hit in nearby:
+            create_wall_segment(hit.position, position)
+    else:
+        # Isolated hit - just a small obstacle
+        create_point_obstacle(position)
+```
+
+#### 3. Alternative Win Condition: Capture Zone
+
+Instead of "contain indefinitely," engineer a bounce INTO a capture zone:
+
+- Target zone appears on screen
+- Ball bouncing into zone = win
+- Player builds geometry to redirect ball trajectory
+- More puzzle-like, less survival-like
+
+```
+┌────────────────────────┐
+│                        │
+│   ○ ball               │
+│     \                  │
+│      \→ deflector      │
+│        \               │
+│         ▼              │
+│      [CAPTURE]         │
+└────────────────────────┘
+```
+
+#### 4. Environmental Hazards
+
+**Bouncing bombs** that player must avoid while shooting:
+
+- Move around the play area
+- Hit one = penalty (lose deflectors? speed up ball? game over?)
+- Creates tension beyond just the ball
+- Forces rushed/imperfect shots
+
+#### 5. Projectile-Spawned Dynamic Geometry
+
+Projectiles themselves spawn rotating/morphing obstacles:
+
+- Each hit creates a shape that rotates and changes
+- Could cycle through polygon types (triangle → square → pentagon)
+- Or continuously morph vertices
+- Adds chaos and unpredictability to your own placements
+
+**Variants to test:**
+- Random shape on spawn
+- Shape cycles through variants over time
+- Shape determined by hit timing (hit during certain phase = certain shape)
+- Side count increases/decreases rhythmically
+
+---
+
+## Game Mode Variants (to prototype)
+
+| Mode | Core Mechanic | Win Condition |
+|------|---------------|---------------|
+| **Classic** (current) | Static walls, close gaps | Survive time |
+| **Dynamic** | Rotating geometry, no permanent solutions | Survive time |
+| **Architect** | Connect-the-dots walls | Build enclosure / capture zone |
+| **Pinball** | Engineer bounces | Guide ball to capture zone |
+| **Chaos** | Projectiles spawn morphing geometry | Survive the madness |
+| **Minefield** | Bouncing bombs + ball | Survive without hitting bombs |
+
+**Testing priority:** Start with Dynamic (rotating obstacles) and Architect (connect-the-dots) as they address the core "too easy" problem most directly.
+
+---
+
+## Level Builder Toolkit
+
+### Philosophy
+
+Separate **mechanics** (code) from **level design** (data). A YAML-based level definition allows:
+
+- Rapid iteration on challenges without code changes
+- Community/designer level creation
+- Difficulty progression via level sequences
+- A/B testing different configurations
+
+### Level Definition Schema
+
+```yaml
+# levels/containment/dynamic_intro.yaml
+name: "Spinning Gates"
+description: "Learn to navigate rotating obstacles"
+difficulty: 1
+author: "core"
+
+# Win/lose conditions
+objectives:
+  type: survive  # survive | capture | escape
+  time_limit: 60  # seconds (null = endless)
+  capture_zone:   # only for type: capture
+    position: [0.5, 0.9]
+    radius: 0.08
+
+# Ball configuration
+ball:
+  count: 1
+  speed: 120
+  radius: 20
+  spawn: center  # center | random | position
+  ai: dumb       # dumb | reactive | strategic
+
+# Environment geometry
+environment:
+  # Static walls (screen edges with gaps)
+  walls:
+    - edge: top
+      gaps: [[0.3, 0.4], [0.7, 0.8]]  # [start, end] normalized
+    - edge: bottom
+      gaps: []  # solid wall
+
+  # Dynamic rotating obstacles
+  spinners:
+    - position: [0.3, 0.5]
+      shape: triangle
+      size: 80
+      rotation_speed: 45  # degrees/second
+
+    - position: [0.7, 0.5]
+      shape: rectangle
+      size: 100
+      rotation_speed: -30  # negative = counter-clockwise
+
+  # Morphing obstacles (change shape over time)
+  morphers:
+    - position: [0.5, 0.3]
+      shapes: [triangle, square, pentagon, hexagon]
+      morph_interval: 2.0  # seconds between shape changes
+      size: 60
+
+  # Bouncing hazards
+  bombs:
+    - speed: 100
+      radius: 25
+      spawn: random
+      behavior: bounce  # bounce | seek_player | patrol
+
+# Player mechanics
+player:
+  mode: connect_dots  # point | line | connect_dots | morph_spawn
+
+  # For connect_dots mode
+  connect_threshold: 100  # pixels - closer creates walls
+
+  # For morph_spawn mode
+  spawn_shapes: [triangle, square]
+  spawn_rotation: true
+
+  # Constraints
+  max_obstacles: null  # null = unlimited
+  obstacle_lifetime: null  # null = permanent, or seconds
+
+# Pacing overrides (optional - defaults from --pacing flag)
+pacing:
+  archery:
+    ball_speed: 80
+    connect_threshold: 120  # larger threshold = easier to connect
+  blaster:
+    ball_speed: 200
+    connect_threshold: 60
+```
+
+### Toolkit Components
+
+```
+games/Containment/
+├── toolkit/
+│   ├── __init__.py
+│   ├── level_loader.py      # Parse YAML, validate, instantiate
+│   ├── geometry.py          # Spinner, Morpher, Wall classes
+│   ├── objectives.py        # Win/lose condition checkers
+│   └── spawners.py          # Ball, bomb, obstacle spawning
+├── levels/
+│   ├── tutorial/
+│   │   ├── 01_static.yaml
+│   │   ├── 02_first_spinner.yaml
+│   │   └── 03_connect_dots.yaml
+│   ├── campaign/
+│   │   ├── 01_easy.yaml
+│   │   └── ...
+│   └── challenge/
+│       ├── chaos_mode.yaml
+│       └── minefield.yaml
+└── game_mode.py             # Uses toolkit to run levels
+```
+
+### Level Loader API
+
+```python
+from toolkit.level_loader import load_level, LevelConfig
+
+class ContainmentMode(BaseGame):
+    def __init__(self, level: str = None, **kwargs):
+        if level:
+            self.config = load_level(f"levels/{level}.yaml")
+        else:
+            self.config = LevelConfig.default()
+
+        self._setup_from_config(self.config)
+
+    def _setup_from_config(self, config: LevelConfig):
+        # Ball
+        self.ball = Ball(
+            speed=config.ball.speed,
+            radius=config.ball.radius,
+            ai=config.ball.ai,
+        )
+
+        # Environment
+        for spinner_def in config.environment.spinners:
+            self.spinners.append(Spinner(**spinner_def))
+
+        for morpher_def in config.environment.morphers:
+            self.morphers.append(Morpher(**morpher_def))
+
+        # Objectives
+        self.objective = create_objective(config.objectives)
+```
+
+### CLI Integration
+
+```bash
+# Play specific level
+python dev_game.py containment --level tutorial/01_static
+
+# List available levels
+python dev_game.py containment --list-levels
+
+# Play campaign (sequential levels)
+python dev_game.py containment --campaign
+
+# Random challenge
+python dev_game.py containment --random-level difficulty=3
+```
+
+### Level Editor (Future)
+
+Eventually, a visual level editor:
+
+```
+┌─────────────────────────────────────────────────┐
+│  CONTAINMENT LEVEL EDITOR                       │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  [Toolbox]     │  [Preview]                     │
+│  ○ Ball        │                                │
+│  △ Spinner     │      △                         │
+│  ◇ Morpher     │           ○                    │
+│  ● Bomb        │                 □              │
+│  ─ Wall        │                                │
+│  □ Capture     │                                │
+│                │                                │
+├─────────────────────────────────────────────────┤
+│  [Properties]  rotation: 45°/s  size: 80px     │
+│  [Test] [Save] [Export YAML]                    │
+└─────────────────────────────────────────────────┘
+```
+
+But YAML-first approach means levels are creatable without the editor.
+
+---
+
+## Open Questions (Updated)
+
+1. ~~**Deflector shape:** Line segments? Arrow shapes? Circles?~~ → Now depends on mode (connect-the-dots vs point obstacles)
+
+2. **Rotation speed:** How fast should dynamic geometry rotate? Needs to be readable but challenging.
+
+3. **Connect threshold:** What distance triggers wall creation vs point obstacle?
+
+4. **Morphing rate:** If shapes change over time, how fast? Synchronized or independent?
+
+5. **Bomb behavior:** Bouncing pattern for hazards? Predictable vs chaotic?
+
+6. **Capture zone placement:** Random? Strategic (hardest corner)? Player-placed?
+
+7. **Retrieval mechanic:** Does dynamic geometry pause during retrieval? (Probably yes for archery mode)
+
+---
+
+## Future: Multiplayer Modes
+
+### Concept
+
+Containment's mechanics naturally extend to multiplayer - both cooperative and competitive.
+
+### Local Multiplayer (Same Screen)
+
+**Cooperative:**
+- Multiple players defend against the same ball(s)
+- Different colored projectiles/deflectors per player
+- Shared win/lose condition
+- "You take left side, I'll take right"
+
+**Competitive (Pong-like):**
+- Each player has a capture zone on their side
+- Ball entering YOUR zone = opponent scores
+- Build deflectors to redirect ball toward opponent's zone
+- First to N points wins
+
+```
+┌────────────────────────────────────────┐
+│  [P1 ZONE]          ○           [P2 ZONE]│
+│     ▲               ball           ▼     │
+│   blue                           red     │
+│  deflectors                   deflectors │
+└────────────────────────────────────────┘
+```
+
+### Networked Multiplayer (Adjacent Targets)
+
+Two archers on adjacent target butts, each with their own projector/camera:
+
+**Architecture:**
+```
+┌─────────────┐    network    ┌─────────────┐
+│  Butt A     │◄────────────►│  Butt B     │
+│  Projector  │   game state  │  Projector  │
+│  Camera     │   sync        │  Camera     │
+│  Player 1   │               │  Player 2   │
+└─────────────┘               └─────────────┘
+```
+
+**Sync requirements:**
+- Ball position/velocity (authoritative server or peer-to-peer)
+- Deflector placements from each player
+- Score state
+- Low latency critical for real-time physics
+
+**Game modes:**
+- **Mirror:** Same ball physics, each sees their own perspective
+- **Portal:** Ball can cross between screens (hits right edge of A → appears left edge of B)
+- **Volley:** Like tennis - redirect ball to opponent's screen
+
+### Level Schema Extension
+
+```yaml
+# levels/multiplayer/versus_basic.yaml
+multiplayer:
+  mode: competitive  # cooperative | competitive
+  players: 2
+
+  player_zones:
+    - player: 1
+      color: [0, 100, 255]  # blue
+      capture_zone:
+        edge: left
+        position: [0.0, 0.5]
+        size: 0.2
+    - player: 2
+      color: [255, 100, 0]  # orange
+      capture_zone:
+        edge: right
+        position: [1.0, 0.5]
+        size: 0.2
+
+  scoring:
+    type: first_to  # first_to | timed
+    target: 5       # points to win
+```
+
+### Implementation Considerations
+
+- **Input disambiguation:** How to know which player made a shot?
+  - Local: Different input devices, or screen regions
+  - Networked: Each client reports own hits
+- **Fairness:** Ball physics must be deterministic for network sync
+- **Latency compensation:** Deflector placement needs to feel instant even with network delay
+
+### Priority
+
+This is a future feature - single-player needs to be solid first. But the YAML level system should be designed with multiplayer extensibility in mind.
 
 ---
 
