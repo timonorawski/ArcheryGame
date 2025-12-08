@@ -8,6 +8,51 @@ Adversarial containment game where a ball/entity tries to escape through gaps at
 
 ---
 
+## Implementation Status (December 2024)
+
+### Implemented
+
+- [x] **Classic Mode**: Static walls with gaps, survive time limit
+- [x] **Dynamic Mode**: Rotating spinner obstacles, no escape gaps
+- [x] Ball physics with bounce and speed penalty on direct hit
+- [x] Deflector placement (random angle at hit position)
+- [x] Collision detection with penetration depth and push-out (fixes ball sticking)
+- [x] Spinner obstacles (triangle, square, pentagon, hexagon) with rotation
+- [x] Tempo presets (zen/mid/wild)
+- [x] Pacing presets (archery/throwing/blaster)
+- [x] Palette support
+- [x] Quiver/retrieval support
+- [x] HUD showing mode, time, bounces, deflector count
+
+### CLI Flags
+
+```bash
+# Classic mode (default)
+python dev_game.py containment --mode classic --tempo mid
+
+# Dynamic mode with spinners
+python dev_game.py containment --mode dynamic --spinner-count 3
+
+# Tempo variants
+python dev_game.py containment --tempo zen    # Slow, meditative
+python dev_game.py containment --tempo wild   # Fast, chaotic
+
+# Endless mode
+python dev_game.py containment --time-limit 0
+```
+
+### Not Yet Implemented
+
+- [ ] Connect-the-dots wall building (proximity-based)
+- [ ] Capture zone win condition
+- [ ] Ball AI (reactive/strategic modes)
+- [ ] Bouncing bomb hazards
+- [ ] Projectile-spawned morphing geometry
+- [ ] YAML level loader
+- [ ] Multiplayer modes
+
+---
+
 ## Core Mechanics
 
 ### Ball Physics
@@ -115,68 +160,81 @@ class GameState(Enum):
 
 ## Implementation Phases
 
-### Phase 1: Core Loop (MVP)
+### Phase 1: Core Loop (MVP) ✓ COMPLETE
 
 **Goal:** Playable game with mouse input, basic physics
 
-Files to create:
+Files created:
 - `games/Containment/game_info.py` - Game metadata, CLI args
-- `games/Containment/game_mode.py` - Main game class
+- `games/Containment/game_mode.py` - Main game class (inherits BaseGame)
 - `games/Containment/config.py` - Constants and presets
 - `games/Containment/ball.py` - Ball entity with physics
 - `games/Containment/deflector.py` - Deflector entity
 - `games/Containment/gap.py` - Gap management
-- `games/Containment/main.py` - Standalone entry point
-- `games/Containment/input/` - Input system (copy from existing game)
+- `games/Containment/spinner.py` - Rotating polygon obstacles (dynamic mode)
 
 MVP Features:
-- [ ] Ball spawns center, random initial direction
-- [ ] Ball bounces off screen edges (except gaps)
-- [ ] Click places deflector at position
-- [ ] Ball reflects off deflectors
-- [ ] Ball escaping through gap = game over
-- [ ] Basic HUD: time survived, deflector count, ball speed
+- [x] Ball spawns center, random initial direction
+- [x] Ball bounces off screen edges (except gaps in classic mode)
+- [x] Click places deflector at position (random angle)
+- [x] Ball reflects off deflectors with proper push-out
+- [x] Ball escaping through gap = game over (classic mode)
+- [x] Basic HUD: time survived, deflector count, ball speed, bounce count
 
-### Phase 2: Polish & Difficulty
+### Phase 2: Polish & Difficulty ✓ MOSTLY COMPLETE
 
 **Goal:** Tunable difficulty, visual feedback
 
-- [ ] Tempo presets (zen/mid/wild)
-- [ ] Speed increase on direct ball hit
+- [x] Tempo presets (zen/mid/wild)
+- [x] Speed increase on direct ball hit
 - [ ] Visual feedback: ball trail, deflector placement animation
 - [ ] Gap visualization (pulsing edges, danger indicators)
 - [ ] Sound effects: bounce, place, escape, hit-penalty
-- [ ] Score calculation and display
+- [x] Score calculation and display (time survived)
 
-### Phase 3: AI Behavior
+### Phase 3: Dynamic Mode ✓ COMPLETE (new phase)
+
+**Goal:** Address "too easy/static" feedback
+
+- [x] `--mode dynamic` flag
+- [x] Spinner class: rotating polygon obstacles
+- [x] Multiple spinner shapes (triangle, square, pentagon, hexagon)
+- [x] Configurable rotation speed and direction
+- [x] SpinnerManager with default layout generation
+- [x] Ball bounces off all screen edges (no escape in dynamic mode)
+- [x] `--spinner-count N` flag
+
+### Phase 4: AI Behavior (NOT STARTED)
 
 **Goal:** Ball becomes adversarial opponent
 
-- [ ] Dumb mode: pure physics (default)
+- [x] Dumb mode: pure physics (default) - implemented
 - [ ] Reactive mode: gap-seeking bias
 - [ ] Strategic mode: pattern learning, baiting
 - [ ] AI difficulty as separate axis from tempo
 
-### Phase 4: Multi-Device Compliance
+### Phase 5: Multi-Device Compliance ✓ COMPLETE
 
 **Goal:** Full AMS integration
 
-- [ ] Pacing presets for archery/throwing/blaster
-- [ ] Quiver support (limited deflectors before retrieval)
-- [ ] Retrieval pause state
-- [ ] AMS color palette support
-- [ ] Test palette cycling (P key)
+- [x] Pacing presets for archery/throwing/blaster
+- [x] Quiver support (limited deflectors before retrieval)
+- [x] Retrieval pause state
+- [x] AMS color palette support
+- [x] Test palette cycling (P key)
 
-### Phase 5: Advanced Features
+### Phase 6: Advanced Features (NOT STARTED)
 
 **Goal:** Depth and replayability
 
+- [ ] Connect-the-dots wall building mode
+- [ ] Capture zone win condition (pinball mode)
 - [ ] Multiple balls (Wild mode)
-- [ ] Dynamic gap spawning mid-game
-- [ ] Deflector types (angled, curved, temporary)
+- [ ] Bouncing bomb hazards
+- [ ] Projectile-spawned morphing geometry
+- [ ] YAML level loader
 - [ ] Containment win condition (trap detection)
 - [ ] Leaderboards / personal bests
-- [ ] Theme variants (abstract, sci-fi, playful)
 
 ---
 
@@ -238,7 +296,7 @@ def calculate_gap_bias(ball: Ball, gaps: List[Gap]) -> Vector2D:
 
 ---
 
-## CLI Arguments
+## CLI Arguments (Current Implementation)
 
 ```python
 ARGUMENTS = [
@@ -246,29 +304,27 @@ ARGUMENTS = [
     {'name': '--pacing', 'type': str, 'default': 'throwing',
      'help': 'Pacing preset: archery, throwing, blaster'},
 
+    # Game mode
+    {'name': '--mode', 'type': str, 'default': 'classic',
+     'help': 'Game mode: classic (static walls), dynamic (rotating spinners)'},
+
     # Game-specific difficulty
     {'name': '--tempo', 'type': str, 'default': 'mid',
      'help': 'Tempo preset: zen, mid, wild (ball aggression)'},
     {'name': '--ai', 'type': str, 'default': 'dumb',
      'help': 'AI level: dumb, reactive, strategic'},
 
-    # Game mode
+    # Time/scoring
     {'name': '--time-limit', 'type': int, 'default': 60,
      'help': 'Seconds to survive (0 = endless)'},
     {'name': '--gap-count', 'type': int, 'default': None,
-     'help': 'Number of gaps (overrides preset)'},
+     'help': 'Number of gaps (overrides preset, classic mode only)'},
+    {'name': '--spinner-count', 'type': int, 'default': 3,
+     'help': 'Number of spinners (dynamic mode only)'},
 
     # Physical constraints (standard AMS parameters)
     {'name': '--max-deflectors', 'type': int, 'default': None,
      'help': 'Maximum deflectors allowed (None = unlimited)'},
-    {'name': '--quiver-size', 'type': int, 'default': None,
-     'help': 'Shots before retrieval pause'},
-    {'name': '--retrieval-pause', 'type': int, 'default': 30,
-     'help': 'Seconds for retrieval (0 = manual)'},
-
-    # Palette (standard AMS parameter)
-    {'name': '--palette', 'type': str, 'default': None,
-     'help': 'Test palette: full, bw, warm, cool, etc.'},
 ]
 ```
 
@@ -430,18 +486,18 @@ class SpawnedGeometry:
 
 ---
 
-## Game Mode Variants (to prototype)
+## Game Mode Variants
 
-| Mode | Core Mechanic | Win Condition |
-|------|---------------|---------------|
-| **Classic** (current) | Static walls, close gaps | Survive time |
-| **Dynamic** | Rotating geometry, no permanent solutions | Survive time |
-| **Architect** | Connect-the-dots walls | Build enclosure / capture zone |
-| **Pinball** | Engineer bounces | Guide ball to capture zone |
-| **Chaos** | Projectiles spawn morphing geometry | Survive the madness |
-| **Minefield** | Bouncing bombs + ball | Survive without hitting bombs |
+| Mode | Core Mechanic | Win Condition | Status |
+|------|---------------|---------------|--------|
+| **Classic** | Static walls, close gaps | Survive time | ✓ Implemented |
+| **Dynamic** | Rotating spinners, no permanent solutions | Survive time | ✓ Implemented |
+| **Architect** | Connect-the-dots walls | Build enclosure / capture zone | Planned |
+| **Pinball** | Engineer bounces | Guide ball to capture zone | Planned |
+| **Chaos** | Projectiles spawn morphing geometry | Survive the madness | Planned |
+| **Minefield** | Bouncing bombs + ball | Survive without hitting bombs | Planned |
 
-**Testing priority:** Start with Dynamic (rotating obstacles) and Architect (connect-the-dots) as they address the core "too easy" problem most directly.
+**Next priority:** Architect (connect-the-dots) - would add strategic depth to deflector placement.
 
 ---
 
