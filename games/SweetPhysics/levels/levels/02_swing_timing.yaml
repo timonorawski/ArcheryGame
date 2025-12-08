@@ -1,0 +1,44 @@
+name: "Tutorial 2: Swing Timing"
+author: "AMS Team"
+difficulty: 1
+description: "Wait for the right moment in the swing"
+
+arrow_budget: 5
+
+stars:
+  one_star:
+    complete: true
+  two_star:
+    complete: true
+    shots: 3
+  three_star:
+    complete: true
+    shots: 1
+    stars: 1
+
+physics:
+  gravity: [0, 700]
+  air_resistance: 0.998
+
+elements:
+  - type: candy
+    position: [400, 200]
+
+  - type: rope
+    anchor: [640, 50]
+    attachment: candy
+    length: 180
+    segments: 10
+
+  - type: goal
+    position: [900, 550]
+    radius: 65
+
+  - type: star
+    position: [750, 350]
+
+  # Platform blocking direct drop
+  - type: platform
+    start: [500, 450]
+    end: [780, 450]
+    thickness: 15

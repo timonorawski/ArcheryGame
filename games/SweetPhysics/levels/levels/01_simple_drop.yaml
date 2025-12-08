@@ -1,0 +1,37 @@
+name: "Tutorial 1: Simple Drop"
+author: "AMS Team"
+difficulty: 1
+description: "Cut the rope to drop candy into the goal"
+
+arrow_budget: 3
+
+stars:
+  one_star:
+    complete: true
+  two_star:
+    complete: true
+    shots: 2
+  three_star:
+    complete: true
+    shots: 1
+
+physics:
+  gravity: [0, 600]
+  air_resistance: 0.995
+
+elements:
+  - type: candy
+    position: [640, 180]
+
+  - type: rope
+    anchor: [640, 50]
+    attachment: candy
+    length: 130
+    segments: 8
+
+  - type: goal
+    position: [640, 550]
+    radius: 70
+
+  - type: star
+    position: [640, 380]

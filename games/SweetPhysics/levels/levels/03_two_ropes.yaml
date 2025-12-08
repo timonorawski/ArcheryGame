@@ -1,0 +1,53 @@
+name: "Tutorial 3: Two Ropes"
+author: "AMS Team"
+difficulty: 2
+description: "Cut the ropes in the right order"
+
+arrow_budget: 4
+
+stars:
+  one_star:
+    complete: true
+  two_star:
+    complete: true
+    shots: 3
+  three_star:
+    complete: true
+    shots: 2
+    stars: 3
+
+physics:
+  gravity: [0, 650]
+  air_resistance: 0.995
+
+elements:
+  - type: candy
+    position: [640, 200]
+
+  # Left rope
+  - type: rope
+    anchor: [500, 50]
+    attachment: candy
+    length: 180
+    segments: 10
+
+  # Right rope
+  - type: rope
+    anchor: [780, 50]
+    attachment: candy
+    length: 180
+    segments: 10
+
+  - type: goal
+    position: [640, 580]
+    radius: 60
+
+  # Stars along fall path
+  - type: star
+    position: [580, 350]
+
+  - type: star
+    position: [640, 420]
+
+  - type: star
+    position: [700, 350]

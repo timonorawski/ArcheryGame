@@ -1,0 +1,52 @@
+name: "Tutorial 4: Bouncy Landing"
+author: "AMS Team"
+difficulty: 2
+description: "Use the platform to bounce toward the goal"
+
+arrow_budget: 4
+
+stars:
+  one_star:
+    complete: true
+  two_star:
+    complete: true
+    stars: 2
+  three_star:
+    complete: true
+    shots: 2
+    stars: 3
+
+physics:
+  gravity: [0, 700]
+  air_resistance: 0.995
+
+elements:
+  - type: candy
+    position: [300, 150]
+
+  - type: rope
+    anchor: [300, 50]
+    attachment: candy
+    length: 100
+    segments: 6
+
+  # Goal on the right side
+  - type: goal
+    position: [950, 550]
+    radius: 60
+
+  # Angled bounce platform
+  - type: platform
+    start: [400, 500]
+    end: [700, 400]
+    thickness: 12
+
+  # Stars along bounce path
+  - type: star
+    position: [350, 350]
+
+  - type: star
+    position: [550, 380]
+
+  - type: star
+    position: [800, 480]
