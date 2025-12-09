@@ -1,14 +1,13 @@
 """
 Level loader for Sweet Physics.
 
-Loads level definitions from YAML files.
+Loads level definitions from YAML files using the common level system.
 """
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import yaml
+from games.common.levels import LevelLoader as BaseLevelLoader
 
 
 @dataclass
@@ -61,70 +60,17 @@ class LevelData:
     elements: List[ElementData] = field(default_factory=list)
 
     # Metadata
-    file_path: Optional[str] = None
+    file_path: Optional[Path] = None
 
 
-class LevelLoader:
+class SweetPhysicsLevelLoader(BaseLevelLoader[LevelData]):
     """
-    Loads level definitions from YAML files.
+    Level loader for Sweet Physics game.
+
+    Extends the common LevelLoader with game-specific parsing.
     """
 
-    def __init__(self, levels_dir: Optional[str] = None):
-        """
-        Initialize level loader.
-
-        Args:
-            levels_dir: Directory containing level YAML files
-        """
-        if levels_dir is None:
-            # Default to levels/ subdirectory
-            levels_dir = os.path.join(os.path.dirname(__file__), 'levels')
-
-        self._levels_dir = Path(levels_dir)
-
-    def list_levels(self) -> List[str]:
-        """
-        List available level files.
-
-        Returns:
-            List of level names (without .yaml extension)
-        """
-        if not self._levels_dir.exists():
-            return []
-
-        levels = []
-        for f in sorted(self._levels_dir.glob('*.yaml')):
-            levels.append(f.stem)
-
-        return levels
-
-    def load_level(self, name: str) -> LevelData:
-        """
-        Load a level by name.
-
-        Args:
-            name: Level name (without .yaml extension)
-
-        Returns:
-            Loaded level data
-
-        Raises:
-            FileNotFoundError: If level file doesn't exist
-            ValueError: If level file is invalid
-        """
-        # Try with and without .yaml extension
-        level_path = self._levels_dir / f"{name}.yaml"
-        if not level_path.exists():
-            level_path = self._levels_dir / name
-            if not level_path.exists():
-                raise FileNotFoundError(f"Level not found: {name}")
-
-        with open(level_path, 'r') as f:
-            data = yaml.safe_load(f)
-
-        return self._parse_level(data, str(level_path))
-
-    def _parse_level(self, data: Dict[str, Any], file_path: str) -> LevelData:
+    def _parse_level_data(self, data: Dict[str, Any], file_path: Path) -> LevelData:
         """Parse raw YAML data into LevelData."""
         if not isinstance(data, dict):
             raise ValueError(f"Invalid level format: expected dict, got {type(data)}")

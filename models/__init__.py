@@ -33,6 +33,7 @@ from .calibration import (
     CalibrationQuality,
     CalibrationData,
     CalibrationConfig,
+    ScreenBounds,
 )
 
 # ============================================================================
@@ -81,6 +82,7 @@ __all__ = [
     "CalibrationQuality",
     "CalibrationData",
     "CalibrationConfig",
+    "ScreenBounds",
     # Game
     "ImpactDetection",
     "TargetDefinition",

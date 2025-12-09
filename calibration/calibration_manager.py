@@ -17,7 +17,8 @@ from models import (
     CalibrationQuality,
     Point2D,
     Resolution,
-    HomographyMatrix
+    HomographyMatrix,
+    ScreenBounds,
 )
 from calibration.pattern_generator import ArucoPatternGenerator
 from calibration.pattern_detector import ArucoPatternDetector
@@ -76,6 +77,17 @@ class CalibrationManager:
         print(f"Loaded calibration from {filepath}")
         print(f"  Quality: RMS error = {self._calibration.quality.reprojection_error_rms:.2f}px")
         print(f"  Acceptable: {self._calibration.quality.is_acceptable}")
+
+        # Compute screen bounds if not present in loaded data
+        # (for backward compatibility with older calibration files)
+        if self._calibration.screen_bounds is None:
+            screen_bounds = self._compute_screen_bounds(self._calibration.projector_resolution)
+            # Update the calibration data with computed bounds
+            # Note: Using object.__setattr__ since Pydantic models are frozen by default
+            object.__setattr__(self._calibration, 'screen_bounds', screen_bounds)
+            print(f"  Screen bounds: computed from homography")
+        else:
+            print(f"  Screen bounds: loaded from file")
 
     def camera_to_game(self, camera_point: Point2D) -> Point2D:
         """
@@ -154,6 +166,104 @@ class CalibrationManager:
         )[0][0]
 
         return Point2D(x=cam_pt[0], y=cam_pt[1])
+
+    def is_within_screen_bounds(self, camera_point: Point2D) -> bool:
+        """
+        Check if a camera-space point is within the projected screen area.
+
+        The camera typically sees more than just the projection surface.
+        This method filters out detections that fall outside the active
+        game area (outside the projected screen).
+
+        Args:
+            camera_point: Point in camera pixel coordinates
+
+        Returns:
+            True if point is within the projected screen bounds,
+            False if outside or if no bounds are available
+
+        Note:
+            Returns True if calibration has no screen_bounds (permissive fallback)
+        """
+        if not self.is_calibrated():
+            return True  # No calibration = no filtering
+
+        if self._calibration.screen_bounds is None:
+            return True  # No bounds defined = no filtering
+
+        return self._calibration.screen_bounds.contains_point(
+            camera_point.x, camera_point.y
+        )
+
+    def get_screen_bounds(self) -> Optional[ScreenBounds]:
+        """
+        Get the camera-space polygon of the projected screen.
+
+        Returns:
+            ScreenBounds object, or None if not calibrated or no bounds
+        """
+        if not self.is_calibrated():
+            return None
+        return self._calibration.screen_bounds
+
+    def get_camera_geometry(self) -> Optional[dict]:
+        """
+        Get camera viewing geometry for impact point estimation.
+
+        Used by STUCK mode to determine which edge of a projectile
+        blob is the actual impact point (tip vs tail).
+
+        Returns:
+            Dictionary with:
+                - camera_center_x: Camera optical center X in pixels
+                - camera_center_y: Camera optical center Y in pixels
+            Or None if not calibrated.
+        """
+        if not self.is_calibrated():
+            return None
+
+        # Camera optical center is typically the image center
+        cam_center_x = self._calibration.camera_resolution.width / 2
+        cam_center_y = self._calibration.camera_resolution.height / 2
+
+        return {
+            'camera_center_x': cam_center_x,
+            'camera_center_y': cam_center_y,
+        }
+
+    def _compute_screen_bounds(self, projector_resolution: Resolution) -> ScreenBounds:
+        """
+        Compute the camera-space corners of the projected screen.
+
+        Projects the four corners of the projector resolution back to
+        camera space to define the active detection area.
+
+        Args:
+            projector_resolution: The projector's resolution
+
+        Returns:
+            ScreenBounds with the four corners in camera pixel coordinates
+        """
+        w = projector_resolution.width
+        h = projector_resolution.height
+
+        # Projector corners (clockwise from top-left)
+        corners_proj = [
+            Point2D(x=0, y=0),      # top-left
+            Point2D(x=w, y=0),      # top-right
+            Point2D(x=w, y=h),      # bottom-right
+            Point2D(x=0, y=h),      # bottom-left
+        ]
+
+        # Transform each corner to camera space
+        corners_cam = [self.projector_to_camera(p) for p in corners_proj]
+
+        return ScreenBounds(
+            top_left=corners_cam[0],
+            top_right=corners_cam[1],
+            bottom_right=corners_cam[2],
+            bottom_left=corners_cam[3],
+        )
 
     def get_calibration_quality(self) -> CalibrationQuality:
         """
@@ -252,6 +362,19 @@ class CalibrationManager:
             print(f"  RMS error {quality.reprojection_error_rms:.2f}px > "
                   f"{self.config.max_reprojection_error:.2f}px")
 
+        # Store homography matrices first (needed for screen bounds computation)
+        self._H_cam_to_proj = H.to_numpy()
+        self._H_proj_to_cam = np.linalg.inv(self._H_cam_to_proj)
+
+        # Compute screen bounds in camera space
+        # This defines the area of the camera frame that maps to the projected screen
+        screen_bounds = self._compute_screen_bounds(projector_resolution)
+        print(f"Screen bounds computed (camera pixel coords):")
+        print(f"  Top-left: ({screen_bounds.top_left.x:.1f}, {screen_bounds.top_left.y:.1f})")
+        print(f"  Top-right: ({screen_bounds.top_right.x:.1f}, {screen_bounds.top_right.y:.1f})")
+        print(f"  Bottom-right: ({screen_bounds.bottom_right.x:.1f}, {screen_bounds.bottom_right.y:.1f})")
+        print(f"  Bottom-left: ({screen_bounds.bottom_left.x:.1f}, {screen_bounds.bottom_left.y:.1f})")
+
         # Create calibration data
         calibration_data = CalibrationData(
             timestamp=datetime.now(),
@@ -260,13 +383,12 @@ class CalibrationManager:
             homography_camera_to_projector=H,
             quality=quality,
             detection_method=f"aruco_{self.config.grid_size[0]}x{self.config.grid_size[1]}",
-            num_calibration_points=len(camera_points)
+            num_calibration_points=len(camera_points),
+            screen_bounds=screen_bounds
         )
 
         # Store calibration
         self._calibration = calibration_data
-        self._H_cam_to_proj = H.to_numpy()
-        self._H_proj_to_cam = np.linalg.inv(self._H_cam_to_proj)
 
         # Auto-save if configured
         if self.config.auto_save:

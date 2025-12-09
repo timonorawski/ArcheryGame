@@ -7,6 +7,7 @@ Provides:
 - palette: AMS color palette management and test palettes
 - quiver: Physical ammo constraints (arrows, darts, etc.)
 - pacing: Device-speed pacing presets
+- levels: YAML-based level loading and level groups
 - input: Common input event handling
 """
 
@@ -15,6 +16,12 @@ from games.common.base_game import BaseGame
 from games.common.palette import GamePalette, TEST_PALETTES, get_palette_names
 from games.common.quiver import QuiverState, create_quiver
 from games.common.pacing import get_pacing_preset, get_pacing_names, scale_for_pacing
+from games.common.levels import (
+    LevelInfo,
+    LevelGroup,
+    LevelLoader,
+    SimpleLevelLoader,
+)
 
 __all__ = [
     'GameState',
@@ -27,4 +34,8 @@ __all__ = [
     'get_pacing_preset',
     'get_pacing_names',
     'scale_for_pacing',
+    'LevelInfo',
+    'LevelGroup',
+    'LevelLoader',
+    'SimpleLevelLoader',
 ]

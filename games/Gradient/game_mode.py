@@ -87,14 +87,14 @@ class GradientMode(BaseGame):
         {
             'name': '--encoding',
             'type': str,
-            'default': 'rgb',
+            'default': 'checkerboard',
             'choices': ['rgb', 'hsv', 'checkerboard'],
             'help': 'Gradient encoding method (rgb=position as color, hsv=hue wheel, checkerboard=grid pattern)'
         },
         {
             'name': '--show-grid',
             'action': 'store_true',
-            'default': False,
+            'default': True,
             'help': 'Show grid overlay for visual reference'
         },
         {
@@ -107,7 +107,7 @@ class GradientMode(BaseGame):
 
     def __init__(
         self,
-        encoding: str = 'rgb',
+        encoding: str = 'checkerboard',
         show_grid: bool = False,
         clear_on_r: bool = True,
         **kwargs,

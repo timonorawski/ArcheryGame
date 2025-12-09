@@ -21,7 +21,9 @@ from games.Containment.spinner import SpinnerManager, create_spinner
 from games.Containment.grow_obstacle import GrowObstacle
 from games.Containment.morph_obstacle import MorphObstacle, create_morph_obstacle
 from games.Containment import config
+from games.common.levels import LevelLoader
 from games.Containment.levels import (
+    ContainmentLevelLoader,
     LevelConfig,
     load_level,
     apply_pacing_overrides,
@@ -52,22 +54,11 @@ class ContainmentMode(BaseGame):
     VERSION = "1.0.0"
     AUTHOR = "AMS Team"
 
-    # CLI argument definitions
-    ARGUMENTS = [
-        # Level file
-        {
-            'name': '--level',
-            'type': str,
-            'default': None,
-            'help': 'Path to level YAML file (overrides other settings)'
-        },
-        {
-            'name': '--choose-level',
-            'action': 'store_true',
-            'default': False,
-            'help': 'Show level chooser UI before starting'
-        },
+    # Enable BaseGame level support
+    LEVELS_DIR = Path(__file__).parent / "levels"
 
+    # CLI argument definitions (level args added automatically by BaseGame)
+    ARGUMENTS = [
         # Pacing (standard AMS parameter)
         {
             'name': '--pacing',
@@ -129,8 +120,10 @@ class ContainmentMode(BaseGame):
 
     def __init__(
         self,
-        # Level file (overrides other settings)
+        # Level args (passed to BaseGame)
         level: Optional[str] = None,
+        level_group: Optional[str] = None,
+        list_levels: bool = False,
         choose_level: bool = False,
         # Pacing (device speed)
         pacing: str = 'throwing',
@@ -156,7 +149,9 @@ class ContainmentMode(BaseGame):
         """Initialize the containment game.
 
         Args:
-            level: Path to level YAML file (overrides other settings)
+            level: Level slug to load
+            level_group: Level group/campaign to play through
+            list_levels: Print available levels and exit
             choose_level: Show level chooser UI before starting
             pacing: Device pacing preset (archery, throwing, blaster)
             mode: Game mode - 'classic' (static walls) or 'dynamic' (rotating spinners)
@@ -171,42 +166,16 @@ class ContainmentMode(BaseGame):
             color_palette: AMS-provided color palette
             palette_name: Test palette name for standalone mode
         """
-        # Level chooser state
-        self._show_level_chooser = choose_level and level is None
-        self._level_chooser: Optional[LevelChooser] = None
+        # Store pacing for use in level config application
+        self._pacing_name = pacing
 
-        # Store level path and load if specified
-        self._level_path = level
-        self._level_config: Optional[LevelConfig] = None
-
-        if level:
-            # Load level from YAML
-            level_path = Path(level)
-            if not level_path.is_absolute():
-                # Check if it's a built-in level name
-                levels_dir = get_levels_dir()
-                possible_paths = [
-                    levels_dir / f"{level}.yaml",
-                    levels_dir / "examples" / f"{level}.yaml",
-                    levels_dir / "tutorial" / f"{level}.yaml",
-                    levels_dir / "campaign" / f"{level}.yaml",
-                    levels_dir / "challenge" / f"{level}.yaml",
-                    level_path,
-                ]
-                for p in possible_paths:
-                    if p.exists():
-                        level_path = p
-                        break
-
-            self._level_config = load_level(level_path)
-            self._level_config = apply_pacing_overrides(self._level_config, pacing)
-
-            # Override parameters from level
-            mode = "dynamic" if self._level_config.environment.spinners else "classic"
-            if self._level_config.environment.edges.mode == "gaps":
-                mode = "classic"
-            time_limit = self._level_config.objectives.time_limit or 0
-            ai = self._level_config.ball.ai
+        # Store default game parameters (may be overridden by level)
+        self._default_mode = mode
+        self._default_tempo = tempo
+        self._default_ai = ai
+        self._default_time_limit = time_limit
+        self._default_gap_count = gap_count
+        self._default_spinner_count = spinner_count
 
         # Load presets
         self._pacing = config.get_pacing_preset(pacing)
@@ -214,14 +183,9 @@ class ContainmentMode(BaseGame):
         self._ai_level = ai
         self._game_mode = mode  # 'classic' or 'dynamic'
 
-        # Calculate effective parameters (level overrides if present)
-        if self._level_config:
-            self._ball_speed = self._level_config.ball.speed
-            self._ball_radius = self._level_config.ball.radius
-        else:
-            self._ball_speed = self._pacing.ball_speed * self._tempo.ball_speed_multiplier
-            self._ball_radius = self._pacing.ball_radius
-
+        # Calculate default parameters
+        self._ball_speed = self._pacing.ball_speed * self._tempo.ball_speed_multiplier
+        self._ball_radius = self._pacing.ball_radius
         self._gap_count = gap_count if gap_count is not None else max(
             1, self._pacing.gap_count + self._tempo.gap_count_modifier
         )
@@ -229,11 +193,21 @@ class ContainmentMode(BaseGame):
         self._time_limit = time_limit
         self._max_deflectors = max_deflectors
 
+        # Level config (set via _apply_level_config)
+        self._level_config: Optional[LevelConfig] = None
+
+        # Legacy level chooser (may be used if BaseGame chooser not available)
+        self._level_chooser: Optional[LevelChooser] = None
+
         # Quiver (use preset default if not specified)
         effective_quiver = quiver_size if quiver_size is not None else self._pacing.quiver_size
 
-        # Initialize base game (handles palette and quiver)
+        # Initialize base game (handles palette, quiver, and level loading)
         super().__init__(
+            level=level,
+            level_group=level_group,
+            list_levels=list_levels,
+            choose_level=choose_level,
             color_palette=color_palette,
             palette_name=palette_name,
             quiver_size=effective_quiver if effective_quiver > 0 else None,
@@ -268,8 +242,9 @@ class ContainmentMode(BaseGame):
         # Hit positions tracking (for connect hit mode)
         self._hit_positions: List[Vector2D] = []
 
-        # Initialize game
-        self._init_game()
+        # Initialize game (only if not waiting for level chooser)
+        if not self.show_level_chooser:
+            self._init_game()
 
     def _get_internal_state(self) -> GameState:
         """Map internal state to standard GameState (required by BaseGame).
@@ -278,6 +253,85 @@ class ContainmentMode(BaseGame):
             GameState.PLAYING, GameState.GAME_OVER, or GameState.WON
         """
         return self._state
+
+    # =========================================================================
+    # Level Support (BaseGame integration)
+    # =========================================================================
+
+    def _create_level_loader(self) -> LevelLoader:
+        """Create the level loader for Containment."""
+        return ContainmentLevelLoader(self.LEVELS_DIR)
+
+    def _apply_level_config(self, level_data: LevelConfig) -> None:
+        """Apply loaded level configuration to game state."""
+        self._level_config = level_data
+
+        # Apply pacing overrides to the loaded config
+        self._level_config = apply_pacing_overrides(self._level_config, self._pacing_name)
+
+        # Override game parameters from level
+        self._game_mode = "dynamic" if self._level_config.environment.spinners else "classic"
+        if self._level_config.environment.edges.mode == "gaps":
+            self._game_mode = "classic"
+
+        self._time_limit = self._level_config.objectives.time_limit or 0
+        self._ai_level = self._level_config.ball.ai
+        self._ball_speed = self._level_config.ball.speed
+        self._ball_radius = self._level_config.ball.radius
+
+    def _on_level_transition(self) -> None:
+        """Reinitialize game state for the new level."""
+        self._init_game()
+
+    # =========================================================================
+    # Game Actions (for web controller UI)
+    # =========================================================================
+
+    def get_available_actions(self) -> list:
+        """Get actions available based on current game state."""
+        actions = []
+
+        # Always allow restart when playing (for walk/clear/reset)
+        if self._state == GameState.GAME_OVER:
+            actions.append({'id': 'retry', 'label': 'Retry', 'style': 'primary'})
+        elif self._state == GameState.PLAYING:
+            actions.append({'id': 'retry', 'label': 'Restart', 'style': 'secondary'})
+
+        # Level group navigation
+        if self._state == GameState.GAME_OVER and self._current_group:
+            actions.append({'id': 'skip', 'label': 'Skip Level', 'style': 'secondary'})
+
+        if self._state == GameState.WON:
+            if self._current_group and not self._current_group.is_complete:
+                actions.append({'id': 'next', 'label': 'Next Level', 'style': 'primary'})
+
+        return actions
+
+    def execute_action(self, action_id: str) -> bool:
+        """Execute a game action."""
+        if action_id == 'retry':
+            self._init_game()
+            return True
+
+        elif action_id == 'skip':
+            # Skip to next level in group
+            if self._level_complete():
+                return True
+            return False
+
+        elif action_id == 'next':
+            # Advance to next level
+            if self._state == GameState.WON:
+                if not self._level_complete():
+                    # No more levels, stay in won state
+                    pass
+                return True
+
+        return False
+
+    # =========================================================================
+    # Game Initialization
+    # =========================================================================
 
     def _init_game(self) -> None:
         """Initialize or reset game entities."""
@@ -396,32 +450,25 @@ class ContainmentMode(BaseGame):
         Args:
             level_path: Path to the selected level YAML file
         """
-        self._show_level_chooser = False
+        self.show_level_chooser = False
         self._level_chooser = None
 
-        # Load and apply the selected level
-        self._level_path = level_path
+        # Extract slug from path and use BaseGame level loading
         level_path_obj = Path(level_path)
-        self._level_config = load_level(level_path_obj)
-        self._level_config = apply_pacing_overrides(self._level_config, 'throwing')
+        slug = level_path_obj.stem
 
-        # Override parameters from level
-        self._game_mode = "dynamic" if self._level_config.environment.spinners else "classic"
-        if self._level_config.environment.edges.mode == "gaps":
-            self._game_mode = "classic"
-        self._time_limit = self._level_config.objectives.time_limit or 0
-        self._ai_level = self._level_config.ball.ai
-        self._ball_speed = self._level_config.ball.speed
-        self._ball_radius = self._level_config.ball.radius
+        # Load via BaseGame system (calls _apply_level_config)
+        self._load_level(slug)
 
         # Reinitialize game with new level
         self._init_game()
 
     def _on_level_chooser_back(self) -> None:
         """Callback when back/default is selected in the level chooser."""
-        self._show_level_chooser = False
+        self.show_level_chooser = False
         self._level_chooser = None
-        # Continue with default game (already initialized)
+        # Initialize with default settings (no level)
+        self._init_game()
 
     def handle_pygame_event(self, event: pygame.event.Event) -> bool:
         """Handle raw pygame events (for level chooser mouse support).
@@ -432,7 +479,7 @@ class ContainmentMode(BaseGame):
         Returns:
             True if the event was consumed, False otherwise
         """
-        if self._show_level_chooser and self._level_chooser:
+        if self.show_level_chooser and self._level_chooser:
             result = self._level_chooser.handle_event(event)
             if result:
                 if result == "__back__":
@@ -452,7 +499,7 @@ class ContainmentMode(BaseGame):
             events: List of InputEvent objects
         """
         # Handle level chooser input
-        if self._show_level_chooser:
+        if self.show_level_chooser:
             # Level chooser handles its own mouse events via pygame events
             # For AMS hits, convert to level chooser hits
             for event in events:
@@ -807,7 +854,7 @@ class ContainmentMode(BaseGame):
             dt: Delta time in seconds since last update
         """
         # Handle level chooser UI
-        if self._show_level_chooser:
+        if self.show_level_chooser:
             if self._level_chooser:
                 self._level_chooser.update(dt)
             return
@@ -1012,7 +1059,7 @@ class ContainmentMode(BaseGame):
         self._screen_width, self._screen_height = screen.get_size()
 
         # Handle level chooser UI
-        if self._show_level_chooser:
+        if self.show_level_chooser:
             # Initialize level chooser if needed
             if self._level_chooser is None:
                 self._level_chooser = LevelChooser(

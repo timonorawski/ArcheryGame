@@ -69,12 +69,45 @@ class CalibrationQuality(BaseModel):
         )
 
 
+class ScreenBounds(BaseModel):
+    """
+    Camera-space polygon representing the projected screen area.
+
+    The camera typically sees more than just the projection surface.
+    This polygon defines the corners of the projected screen in camera
+    pixel coordinates, allowing detection to filter out hits outside
+    the active game area.
+    """
+    # Four corners in camera pixel coordinates (clockwise from top-left)
+    top_left: Point2D
+    top_right: Point2D
+    bottom_right: Point2D
+    bottom_left: Point2D
+
+    def to_numpy_polygon(self) -> 'np.ndarray':
+        """Convert to numpy polygon for cv2.pointPolygonTest."""
+        import numpy as np
+        return np.array([
+            [self.top_left.x, self.top_left.y],
+            [self.top_right.x, self.top_right.y],
+            [self.bottom_right.x, self.bottom_right.y],
+            [self.bottom_left.x, self.bottom_left.y],
+        ], dtype=np.float32)
+
+    def contains_point(self, x: float, y: float) -> bool:
+        """Check if a camera-space point is within the screen bounds."""
+        import cv2
+        polygon = self.to_numpy_polygon()
+        result = cv2.pointPolygonTest(polygon, (x, y), False)
+        return result >= 0  # >= 0 means inside or on edge
+
+
 class CalibrationData(BaseModel):
     """
     Complete calibration data for persistence.
     This is the main data structure saved/loaded from disk.
     """
-    version: str = "1.0"
+    version: str = "1.1"  # Bumped for screen_bounds addition
     calibration_time: datetime = Field(default_factory=datetime.now)
     # Alias for backward compatibility
     timestamp: Optional[datetime] = None
@@ -87,6 +120,9 @@ class CalibrationData(BaseModel):
     marker_count: int = Field(default=0, ge=0)
     # Alias for backward compatibility
     num_calibration_points: Optional[int] = None
+
+    # Screen bounds in camera space (for filtering out-of-bounds detections)
+    screen_bounds: Optional[ScreenBounds] = None
 
     # Optional metadata
     notes: Optional[str] = None

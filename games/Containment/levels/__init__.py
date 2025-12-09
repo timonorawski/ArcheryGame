@@ -3,6 +3,9 @@
 Provides level loading and management for the Containment game.
 """
 from .level_loader import (
+    # Level loader class (for BaseGame integration)
+    ContainmentLevelLoader,
+
     # Data classes
     LevelConfig,
     Objectives,
@@ -15,7 +18,7 @@ from .level_loader import (
     HitModeConfig,
     CaptureZone,
 
-    # Loading functions
+    # Loading functions (legacy, for backwards compatibility)
     load_level,
     apply_pacing_overrides,
     list_levels,
@@ -29,6 +32,9 @@ from .level_loader import (
 )
 
 __all__ = [
+    # Level loader class
+    "ContainmentLevelLoader",
+
     # Data classes
     "LevelConfig",
     "Objectives",
@@ -41,7 +47,7 @@ __all__ = [
     "HitModeConfig",
     "CaptureZone",
 
-    # Loading functions
+    # Loading functions (legacy)
     "load_level",
     "apply_pacing_overrides",
     "list_levels",

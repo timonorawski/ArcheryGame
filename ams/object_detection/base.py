@@ -20,6 +20,7 @@ class DetectedObject:
         bounding_box: (x, y, width, height) of bounding box
         confidence: Detection confidence (0.0-1.0)
         timestamp: Time of detection
+        contour: Optional contour points for shape analysis (STUCK mode impact point)
     """
     position: Point2D
     velocity: Point2D  # Using Point2D as 2D vector
@@ -27,6 +28,7 @@ class DetectedObject:
     bounding_box: Tuple[int, int, int, int]  # (x, y, width, height)
     confidence: float
     timestamp: float
+    contour: Optional[np.ndarray] = None  # For impact point estimation in STUCK mode
 
 
 @dataclass

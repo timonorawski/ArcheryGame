@@ -101,7 +101,8 @@ class ColorBlobDetector(ObjectDetector):
                 area=area,
                 bounding_box=(x, y, w, h),
                 confidence=1.0,  # Simple blob detection has binary confidence
-                timestamp=timestamp
+                timestamp=timestamp,
+                contour=contour,  # For STUCK mode impact point estimation
             )
 
             detected_objects.append(obj)

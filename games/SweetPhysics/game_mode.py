@@ -4,6 +4,7 @@ Sweet Physics - Cut the Rope style physics puzzle game.
 Hit targets to manipulate physics elements and guide candy to the goal.
 """
 from enum import Enum
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pygame
@@ -12,10 +13,11 @@ import pymunk
 from games.common import GameState
 from games.common.base_game import BaseGame
 from games.common.input import InputEvent
+from games.common.levels import LevelLoader
 from games.SweetPhysics import config
 from games.SweetPhysics.physics import PhysicsWorld
 from games.SweetPhysics.elements import Candy, Rope, Goal, Star, Platform
-from games.SweetPhysics.levels import LevelLoader, LevelData
+from games.SweetPhysics.levels import SweetPhysicsLevelLoader, LevelData
 from games.SweetPhysics.levels.loader import create_default_level
 
 
@@ -39,25 +41,18 @@ class SweetPhysicsMode(BaseGame):
     VERSION = "1.0.0"
     AUTHOR = "AMS Team"
 
-    ARGUMENTS = [
-        {
-            'name': '--level',
-            'type': str,
-            'default': None,
-            'help': 'Level to play (default: tutorial)'
-        },
-        {
-            'name': '--list-levels',
-            'action': 'store_true',
-            'default': False,
-            'help': 'List available levels and exit'
-        },
-    ]
+    # Enable level support via BaseGame
+    LEVELS_DIR = Path(__file__).parent / "levels"
+
+    # Game-specific arguments (level args added automatically by BaseGame)
+    ARGUMENTS = []
 
     def __init__(
         self,
         level: Optional[str] = None,
         list_levels: bool = False,
+        level_group: Optional[str] = None,
+        choose_level: bool = False,
         **kwargs,
     ):
         """
@@ -66,18 +61,20 @@ class SweetPhysicsMode(BaseGame):
         Args:
             level: Level name to load
             list_levels: If True, list levels and exit
+            level_group: Level group to play through
+            choose_level: Show level chooser UI
             **kwargs: Base game arguments
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            level=level,
+            list_levels=list_levels,
+            level_group=level_group,
+            choose_level=choose_level,
+            **kwargs,
+        )
 
-        # Level loading
-        self._level_loader = LevelLoader()
+        # Current level data (loaded by BaseGame's _apply_level_config)
         self._current_level: Optional[LevelData] = None
-        self._level_name = level
-
-        # Handle list-levels flag
-        if list_levels:
-            self._print_levels()
 
         # Physics
         self._world: Optional[PhysicsWorld] = None
@@ -107,15 +104,17 @@ class SweetPhysicsMode(BaseGame):
         self._font: Optional[pygame.font.Font] = None
         self._font_large: Optional[pygame.font.Font] = None
 
-    def _print_levels(self) -> None:
-        """Print available levels."""
-        levels = self._level_loader.list_levels()
-        print("\nAvailable levels:")
-        for lvl in levels:
-            print(f"  {lvl}")
-        if not levels:
-            print("  (no custom levels found, using default)")
-        print()
+    def _create_level_loader(self) -> LevelLoader:
+        """Create the level loader for Sweet Physics."""
+        return SweetPhysicsLevelLoader(self.LEVELS_DIR)
+
+    def _apply_level_config(self, level_data: LevelData) -> None:
+        """Apply loaded level configuration."""
+        self._current_level = level_data
+
+    def _on_level_transition(self) -> None:
+        """Reinitialize game state for the new level."""
+        self._initialize_level()
 
     def _get_font(self) -> pygame.font.Font:
         if self._font is None:
@@ -133,6 +132,52 @@ class SweetPhysicsMode(BaseGame):
     def get_score(self) -> int:
         """Return stars collected as score."""
         return self._stars_collected
+
+    def get_available_actions(self) -> list:
+        """Get actions available based on current game state."""
+        actions = []
+
+        # Always allow restart when a level is loaded
+        if self._current_level is not None:
+            if self._level_state == LevelState.LOST:
+                # Emphasize retry when lost
+                actions.append({'id': 'retry', 'label': 'Retry Level', 'style': 'primary'})
+            else:
+                # Secondary option during normal play
+                actions.append({'id': 'retry', 'label': 'Restart Level', 'style': 'secondary'})
+
+        if self._level_state == LevelState.LOST:
+            if self._current_group:
+                actions.append({'id': 'skip', 'label': 'Skip Level', 'style': 'secondary'})
+
+        elif self._level_state == LevelState.WON:
+            # During win delay, show what's coming
+            if self._current_group and not self._current_group.is_complete:
+                actions.append({'id': 'next', 'label': 'Next Level', 'style': 'primary'})
+
+        return actions
+
+    def execute_action(self, action_id: str) -> bool:
+        """Execute a game action."""
+        if action_id == 'retry':
+            # Retry current level
+            self._initialize_level()
+            return True
+
+        elif action_id == 'skip':
+            # Skip to next level in group
+            if self._level_complete():
+                return True
+            return False
+
+        elif action_id == 'next':
+            # Manually advance (if win delay hasn't auto-advanced yet)
+            if self._level_state == LevelState.WON:
+                if not self._level_complete():
+                    self._internal_state = GameState.WON
+                return True
+
+        return False
 
     def _initialize_level(self) -> None:
         """Initialize or reinitialize the current level."""
@@ -253,15 +298,10 @@ class SweetPhysicsMode(BaseGame):
             begin=candy_star_begin,
         )
 
-    def _load_level(self) -> None:
-        """Load the specified or default level."""
-        if self._level_name:
-            try:
-                self._current_level = self._level_loader.load_level(self._level_name)
-            except FileNotFoundError:
-                print(f"Level '{self._level_name}' not found, using default")
-                self._current_level = create_default_level()
-        else:
+    def _ensure_level_loaded(self) -> None:
+        """Ensure a level is loaded (use default if none specified)."""
+        if self._current_level is None:
+            # No level was loaded via BaseGame, use default
             self._current_level = create_default_level()
 
     def update(self, dt: float) -> None:
@@ -278,7 +318,7 @@ class SweetPhysicsMode(BaseGame):
 
         # Initialize on first update
         if not self._initialized:
-            self._load_level()
+            self._ensure_level_loaded()
             self._initialize_level()
             self._initialized = True
 
@@ -305,7 +345,10 @@ class SweetPhysicsMode(BaseGame):
         elif self._level_state == LevelState.WON:
             self._win_timer += dt
             if self._win_timer > config.WIN_DELAY:
-                self._internal_state = GameState.WON
+                # Try to advance to next level in group
+                if not self._level_complete():
+                    # No more levels (or not in a group), game complete
+                    self._internal_state = GameState.WON
 
         elif self._level_state == LevelState.LOST:
             self._lose_timer += dt

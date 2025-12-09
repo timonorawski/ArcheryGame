@@ -489,3 +489,43 @@ def shape_name_to_sides(shape: str) -> int:
         return random.choice(list(shapes.values()))
 
     return shapes.get(shape, 3)
+
+
+# =============================================================================
+# Level Loader Class (integrates with BaseGame level system)
+# =============================================================================
+
+from games.common.levels import LevelLoader as BaseLevelLoader
+
+
+class ContainmentLevelLoader(BaseLevelLoader[LevelConfig]):
+    """Level loader for Containment game.
+
+    Integrates with the common level system (BaseGame) while using
+    Containment's existing LevelConfig dataclass.
+
+    Usage:
+        loader = ContainmentLevelLoader(levels_dir)
+        level = loader.load_level('tutorial_01')  # Returns LevelConfig
+    """
+
+    def _parse_level_data(self, data: Dict[str, Any], file_path: Path) -> LevelConfig:
+        """Parse raw YAML data into LevelConfig.
+
+        This wraps the existing parsing logic from load_level().
+        """
+        if not data:
+            return LevelConfig()
+
+        return LevelConfig(
+            name=data.get("name", file_path.stem),
+            description=data.get("description", ""),
+            difficulty=data.get("difficulty", 1),
+            author=data.get("author", "unknown"),
+            version=data.get("version", 1),
+            objectives=_parse_objectives(data.get("objectives", {})),
+            ball=_parse_ball(data.get("ball", {})),
+            environment=_parse_environment(data.get("environment", {})),
+            hit_modes=_parse_hit_modes(data.get("hit_modes")),
+            pacing_overrides=data.get("pacing", {})
+        )

@@ -198,6 +198,22 @@ class LaserDetectionBackend(DetectionBackend):
         cy = M["m01"] / M["m00"]
         camera_pos = Point2D(x=cx, y=cy)
 
+        # Filter out detections outside the projected screen bounds
+        # (camera sees more than just the projection surface)
+        if not self._is_within_screen_bounds(camera_pos):
+            if self.debug_mode:
+                cv2.putText(
+                    debug_frame,
+                    f"Out of bounds: ({int(cx)}, {int(cy)})",
+                    (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 165, 255),  # Orange
+                    2
+                )
+                self.debug_frame = debug_frame
+            return
+
         # Debug: Draw detected spot
         if self.debug_mode:
             if not self.debug_bw_mode:
@@ -302,6 +318,24 @@ class LaserDetectionBackend(DetectionBackend):
         events = self._event_queue.copy()
         self._event_queue.clear()
         return events
+
+    def _is_within_screen_bounds(self, camera_pos: Point2D) -> bool:
+        """Check if a camera-space point is within the projected screen area.
+
+        The camera typically sees more than just the projection surface.
+        This method filters out detections that fall outside the active
+        game area (outside the projected screen).
+
+        Args:
+            camera_pos: Position in camera pixel coordinates
+
+        Returns:
+            True if within bounds, False otherwise
+        """
+        if self.calibration_manager is None or not CALIBRATION_AVAILABLE:
+            return True  # No calibration = no filtering
+
+        return self.calibration_manager.is_within_screen_bounds(camera_pos)
 
     def calibrate(self, display_surface=None, display_resolution=None) -> CalibrationResult:
         """

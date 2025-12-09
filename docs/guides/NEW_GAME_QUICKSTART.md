@@ -400,12 +400,141 @@ ARGUMENTS = [
 3. **Are pauses handled?** Retrieval shouldn't end the game
 4. **Do combos work?** 8+ second windows for archery
 
+## Level Support (Optional)
+
+Games can opt-in to YAML-based level support for campaigns, tutorials, and progression.
+
+### Enable Levels
+
+```python
+from pathlib import Path
+from games.common.base_game import BaseGame
+from games.common.levels import LevelLoader
+
+class MyGameMode(BaseGame):
+    NAME = "My Game"
+    LEVELS_DIR = Path(__file__).parent / 'levels'  # Enable level support
+
+    def _create_level_loader(self) -> LevelLoader:
+        """Return game-specific level loader."""
+        return MyLevelLoader(self.LEVELS_DIR)
+
+    def _apply_level_config(self, level_data) -> None:
+        """Apply level configuration to game state."""
+        self._current_level = level_data
+
+    def _on_level_transition(self) -> None:
+        """Reinitialize game for new level (called during group progression)."""
+        self._initialize_level()
+```
+
+When `LEVELS_DIR` is set, these CLI arguments are added automatically:
+
+- `--level <slug>` - Load specific level
+- `--list-levels` - Print available levels
+- `--level-group <slug>` - Play through a campaign/tutorial
+- `--choose-level` - Show level chooser UI
+
+### Level File Format
+
+```yaml
+# levels/tutorial_01.yaml
+name: "Tutorial 1"
+description: "Learn the basics"
+difficulty: 1
+author: "Your Name"
+
+# Game-specific fields below
+enemies:
+  - type: basic
+    count: 3
+```
+
+### Level Groups (Campaigns)
+
+```yaml
+# levels/campaign.yaml
+group: true
+name: "Main Campaign"
+description: "The story mode"
+
+levels:
+  - tutorial_01
+  - tutorial_02
+  - level_01
+  - boss_01
+```
+
+### Level Progression
+
+When player beats a level, call `_level_complete()`:
+
+```python
+def update(self, dt: float):
+    if self._player_won:
+        # BaseGame handles advancing to next level
+        if not self._level_complete():
+            # No more levels - game complete
+            self._game_state = GameState.WON
+```
+
+See [BASE_GAME_API.md](../architecture/BASE_GAME_API.md#level-system) for full documentation.
+
+## Game Actions (Optional)
+
+Games can expose contextual actions that appear in the web controller UI (retry, skip, next level, etc.).
+
+### Implement Actions
+
+```python
+from games.common.base_game import BaseGame
+
+class MyGameMode(BaseGame):
+    def get_available_actions(self) -> list:
+        """Return actions available based on current state."""
+        actions = []
+
+        # Always allow restart when playing
+        if self._current_level is not None:
+            if self._game_over:
+                actions.append({'id': 'retry', 'label': 'Retry Level', 'style': 'primary'})
+            else:
+                actions.append({'id': 'retry', 'label': 'Restart Level', 'style': 'secondary'})
+
+        # Add next level button when won
+        if self._won and self._has_next_level:
+            actions.append({'id': 'next', 'label': 'Next Level', 'style': 'primary'})
+
+        return actions
+
+    def execute_action(self, action_id: str) -> bool:
+        """Execute an action. Return True if handled."""
+        if action_id == 'retry':
+            self._initialize_level()
+            return True
+        elif action_id == 'next':
+            self._advance_to_next_level()
+            return True
+        return False
+```
+
+### Action Format
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | str | Unique identifier (e.g., 'retry', 'skip') |
+| `label` | str | Button text shown to user |
+| `style` | str | `'primary'` (cyan), `'secondary'` (gray), or `'danger'` (red) |
+
+See [BASE_GAME_API.md](../architecture/BASE_GAME_API.md#game-actions) for full documentation.
+
 ## Example Games
 
 | Game | Notable Features |
 |------|------------------|
 | BalloonPop | Simple BaseGame example |
-| Containment | Physics, geometry, tempo presets |
+| Containment | Physics, geometry, tempo presets, levels |
+| SweetPhysics | Physics puzzles, level groups |
 | Grouping | Endless mode, precision training |
 | ManyTargets | Complex internal states |
 | FruitSlice | Arcing targets, bombs |

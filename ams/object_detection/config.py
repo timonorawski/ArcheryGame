@@ -18,7 +18,8 @@ class DetectorType(str, Enum):
 class ImpactMode(str, Enum):
     """Impact detection modes for different object types."""
     TRAJECTORY_CHANGE = "trajectory_change"  # Bouncing objects (nerf darts, balls)
-    STATIONARY = "stationary"                # Sticking objects (real darts, arrows)
+    STATIONARY = "stationary"                # Stops briefly then may move again
+    STUCK = "stuck"                          # Embeds permanently (arrows, real darts)
 
 
 class ColorBlobConfig(BaseModel):
@@ -107,4 +108,21 @@ class ImpactDetectionConfig(BaseModel):
         default=0.5,
         ge=0.0,
         description="Maximum time gap (seconds) before losing track of object"
+    )
+
+    # STUCK mode parameters
+    stuck_stationary_threshold: float = Field(
+        default=5.0,
+        ge=0.0,
+        description="Velocity threshold (px/s) to consider object stuck"
+    )
+    stuck_confirm_frames: int = Field(
+        default=3,
+        ge=1,
+        description="Consecutive frames object must be stationary to confirm stuck"
+    )
+    handled_radius: float = Field(
+        default=30.0,
+        ge=1.0,
+        description="Radius (px) to consider same stuck location (for deduplication)"
     )

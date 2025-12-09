@@ -35,12 +35,25 @@ class TrackedObject:
     """Tracked object with history for impact detection."""
     object_id: int
     last_detection: DetectedObject
-    stationary_since: Optional[float] = None  # When it became stationary
+    stationary_since: Optional[float] = None  # When it became stationary (STATIONARY mode)
+    stationary_frames: int = 0                 # Consecutive stationary frames (STUCK mode)
     velocity_history: List[Tuple[float, Point2D]] = None  # (timestamp, velocity)
 
     def __post_init__(self):
         if self.velocity_history is None:
             self.velocity_history = []
+
+
+@dataclass
+class HandledObject:
+    """A stuck projectile that has been registered (STUCK mode).
+
+    Once a projectile sticks and registers an impact, it's added here
+    to prevent duplicate detections. Cleared on round reset.
+    """
+    position: Point2D           # Impact point in camera coords
+    registered_at: float        # Timestamp when registered
+    object_id: int              # Tracking ID for reference
 
 
 class ObjectDetectionBackend(DetectionBackend):
@@ -102,6 +115,19 @@ class ObjectDetectionBackend(DetectionBackend):
         self.next_object_id = 0
         self.max_tracking_gap = 0.5  # seconds
 
+        # STUCK mode state
+        self._handled_objects: List[HandledObject] = []
+        self._stuck_stationary_threshold: float = 5.0  # px/s
+        self._stuck_confirm_frames: int = 3
+        self._handled_radius: float = 30.0  # px
+        self._camera_center_x: Optional[float] = None  # Set after calibration
+
+        # Initialize camera geometry if calibration already loaded
+        if self.calibration_manager and self.calibration_manager.is_calibrated():
+            geometry = self.calibration_manager.get_camera_geometry()
+            if geometry:
+                self._camera_center_x = geometry['camera_center_x']
+
         # Debug visualization
         self.debug_mode = False
         self.debug_frame: Optional[np.ndarray] = None
@@ -145,9 +171,21 @@ class ObjectDetectionBackend(DetectionBackend):
         # Update tracking and detect impacts
         impacts = self._update_tracking(detections, timestamp)
 
+        # STUCK mode: check for removed objects (logging only)
+        if self.impact_mode == ImpactMode.STUCK and self._handled_objects:
+            self._check_removed_objects(detections, timestamp)
+
         # Convert impacts to hit events
         events = []
         for impact in impacts:
+            # Filter out impacts outside the projected screen bounds
+            # (camera sees more than just the projection surface)
+            if not self._is_within_screen_bounds(impact.position):
+                logger.debug(
+                    f"Filtering out-of-bounds impact at camera ({impact.position.x:.0f}, {impact.position.y:.0f})"
+                )
+                continue
+
             # Transform coordinates to game space
             game_pos = self._camera_to_game(impact.position)
 
@@ -278,6 +316,40 @@ class ObjectDetectionBackend(DetectionBackend):
                         # Object is moving, reset stationary timer
                         tracked.stationary_since = None
 
+                elif self.impact_mode == ImpactMode.STUCK:
+                    # STUCK mode - detect projectiles that embed permanently (arrows, darts)
+                    # Register once when stuck, then ignore (added to handled list)
+                    is_stationary = speed < self._stuck_stationary_threshold
+
+                    if is_stationary:
+                        # Increment stationary frame counter
+                        tracked.stationary_frames += 1
+
+                        # Check if confirmed stuck (enough consecutive stationary frames)
+                        if tracked.stationary_frames >= self._stuck_confirm_frames:
+                            # Get impact point from contour (tip, not tail)
+                            impact_pos = self._get_impact_point(det.contour, det.position)
+
+                            # Check if this location already has a handled object
+                            if not self._is_handled(impact_pos):
+                                # NEW IMPACT - projectile just stuck!
+                                impact_detected = True
+                                impact = ImpactEvent(
+                                    position=impact_pos,
+                                    velocity_before=tracked.last_detection.velocity,
+                                    timestamp=timestamp,
+                                    stationary_duration=tracked.stationary_frames / 30.0  # Approx seconds
+                                )
+                                impacts.append(impact)
+
+                                # Add to handled list to prevent duplicate detection
+                                self._add_handled(impact_pos, tracked.object_id, timestamp)
+
+                            # Keep tracking (object stays visible but won't trigger again)
+                    else:
+                        # Object is moving, reset stationary counter
+                        tracked.stationary_frames = 0
+
                 # Update tracked object
                 tracked.last_detection = det
                 tracked.velocity_history.append((timestamp, det.velocity))
@@ -359,6 +431,136 @@ class ObjectDetectionBackend(DetectionBackend):
             return self.calibration_manager.camera_to_game(camera_pos)
         except Exception:
             return None
+
+    def _is_within_screen_bounds(self, camera_pos: Point2D) -> bool:
+        """Check if a camera-space point is within the projected screen area.
+
+        The camera typically sees more than just the projection surface.
+        This method filters out detections that fall outside the active
+        game area (outside the projected screen).
+
+        Args:
+            camera_pos: Position in camera pixel coordinates
+
+        Returns:
+            True if within bounds, False otherwise
+        """
+        if self.calibration_manager is None:
+            return True  # No calibration = no filtering
+
+        return self.calibration_manager.is_within_screen_bounds(camera_pos)
+
+    # =========================================================================
+    # STUCK Mode Methods
+    # =========================================================================
+
+    def _is_handled(self, position: Point2D) -> bool:
+        """Check if position matches any handled (already registered) stuck object.
+
+        Args:
+            position: Position to check in camera coordinates
+
+        Returns:
+            True if this position already has a registered stuck object
+        """
+        for handled in self._handled_objects:
+            dx = position.x - handled.position.x
+            dy = position.y - handled.position.y
+            dist = math.sqrt(dx * dx + dy * dy)
+            if dist < self._handled_radius:
+                return True
+        return False
+
+    def _add_handled(self, position: Point2D, object_id: int, timestamp: float) -> None:
+        """Add a new handled stuck object.
+
+        Args:
+            position: Impact position in camera coordinates
+            object_id: Tracking ID of the object
+            timestamp: Time of registration
+        """
+        self._handled_objects.append(HandledObject(
+            position=position,
+            registered_at=timestamp,
+            object_id=object_id
+        ))
+        logger.debug(f"Added handled stuck object at ({position.x:.0f}, {position.y:.0f})")
+
+    def reset_handled_objects(self) -> None:
+        """Clear all handled stuck objects.
+
+        Call this on round reset when user clears the target.
+        """
+        count = len(self._handled_objects)
+        self._handled_objects.clear()
+        if count > 0:
+            logger.info(f"Cleared {count} handled stuck objects")
+
+    def _get_impact_point(self, contour: Optional[np.ndarray], detection_pos: Point2D) -> Point2D:
+        """Estimate true impact point from contour based on camera viewing angle.
+
+        For stuck projectiles (arrows, darts), the detected blob is the tail/fletching,
+        but the actual impact point is the tip. Based on camera position:
+        - If detection is LEFT of camera center → tip is RIGHTMOST point
+        - If detection is RIGHT of camera center → tip is LEFTMOST point
+
+        Args:
+            contour: Contour points from blob detection
+            detection_pos: Center position of detected blob
+
+        Returns:
+            Estimated impact point (tip position)
+        """
+        # Fallback to center if no contour or camera geometry
+        if contour is None or self._camera_center_x is None:
+            return detection_pos
+
+        try:
+            points = contour.reshape(-1, 2)
+
+            if len(points) < 3:
+                return detection_pos
+
+            if detection_pos.x < self._camera_center_x:
+                # Detection left of camera → arrow points right → rightmost is tip
+                idx = np.argmax(points[:, 0])
+            else:
+                # Detection right of camera → arrow points left → leftmost is tip
+                idx = np.argmin(points[:, 0])
+
+            return Point2D(x=float(points[idx, 0]), y=float(points[idx, 1]))
+        except Exception as e:
+            logger.warning(f"Impact point estimation failed: {e}")
+            return detection_pos
+
+    def _check_removed_objects(self, current_detections: List[DetectedObject], timestamp: float) -> None:
+        """Check if any handled stuck objects have been removed (arrow pulled out).
+
+        Logs removal for debugging/future use but does not generate game events.
+
+        Args:
+            current_detections: Current frame's detected objects
+            timestamp: Current timestamp
+        """
+        min_age = 1.0  # Object must be at least 1s old to count as "removed"
+
+        for handled in self._handled_objects:
+            # Check if object has been there long enough to consider removal
+            if (timestamp - handled.registered_at) < min_age:
+                continue
+
+            # Check if still visible (any detection near handled position)
+            still_visible = any(
+                math.sqrt((handled.position.x - det.position.x) ** 2 +
+                         (handled.position.y - det.position.y) ** 2) < self._handled_radius
+                for det in current_detections
+            )
+
+            if not still_visible:
+                logger.info(
+                    f"Stuck object may have been removed at "
+                    f"({handled.position.x:.0f}, {handled.position.y:.0f})"
+                )
 
     def _is_valid_coordinate(self, pos: Point2D) -> bool:
         """Check if coordinate is valid (no NaN, infinity, within game bounds).
@@ -625,6 +827,72 @@ class ObjectDetectionBackend(DetectionBackend):
             print(f"  Inliers: {quality.num_inliers}/{quality.num_total_points}")
             print(f"  Quality: {'GOOD' if quality.is_acceptable else 'POOR'}")
 
+            # Step 2: Run projectile color detection
+            print("\n" + "-" * 60)
+            print("Press SPACE to continue to projectile color detection...")
+            print("Press ESC to skip color detection and use defaults")
+            print("-" * 60)
+
+            # Wait for user to press SPACE or ESC
+            waiting = True
+            skip_color_detection = False
+            while waiting:
+                display_surface.fill((0, 0, 0))
+                font = pygame.font.Font(None, 48)
+
+                # Show calibration success message
+                text1 = font.render("Geometric Calibration Complete!", True, (0, 255, 0))
+                text2 = font.render(f"RMS Error: {quality.reprojection_error_rms:.2f}px", True, (255, 255, 255))
+                text3 = font.render("SPACE = Detect Projectile Color", True, (255, 255, 0))
+                text4 = font.render("ESC = Skip (use defaults)", True, (128, 128, 128))
+
+                y_offset = display_resolution[1] // 2 - 100
+                for i, text in enumerate([text1, text2, text3, text4]):
+                    rect = text.get_rect(center=(display_resolution[0] // 2, y_offset + i * 60))
+                    display_surface.blit(text, rect)
+
+                pygame.display.flip()
+
+                for event in pygame.event.get():
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_SPACE:
+                            waiting = False
+                        elif event.key == pygame.K_ESCAPE:
+                            waiting = False
+                            skip_color_detection = True
+
+                key = cv2.waitKey(1) & 0xFF
+                if key == 32:  # SPACE
+                    waiting = False
+                elif key == 27:  # ESC
+                    waiting = False
+                    skip_color_detection = True
+
+                clock.tick(30)
+
+            # Run color detection if not skipped
+            detected_color_config = None
+            color_detection_notes = ""
+            if not skip_color_detection:
+                detected_color_config = self._run_projectile_color_detection(
+                    display_surface,
+                    display_resolution,
+                    pygame
+                )
+
+                if detected_color_config:
+                    # Update the detector with new color config
+                    self.detector.configure(
+                        hue_min=detected_color_config.hue_min,
+                        hue_max=detected_color_config.hue_max,
+                        saturation_min=detected_color_config.saturation_min,
+                        saturation_max=detected_color_config.saturation_max,
+                        value_min=detected_color_config.value_min,
+                        value_max=detected_color_config.value_max,
+                    )
+                    color_detection_notes = f" | HSV: H({detected_color_config.hue_min}-{detected_color_config.hue_max})"
+                    print("Detector updated with detected color range")
+
             # Create calibration data
             cam_width, cam_height = self.camera.get_resolution()
             calibration_data = CalibrationData(
@@ -636,7 +904,7 @@ class ObjectDetectionBackend(DetectionBackend):
                 marker_count=len(detected_markers)
             )
 
-            # Save calibration
+            # Save calibration (screen_bounds will be computed when loaded)
             calib_path = "calibration.json"
             calibration_data.save(calib_path)
             logger.info(f"Calibration saved to {calib_path}")
@@ -646,13 +914,19 @@ class ObjectDetectionBackend(DetectionBackend):
                 self.calibration_manager.load_calibration(calib_path)
                 logger.debug("Calibration manager updated")
 
+                # Update camera geometry for STUCK mode impact point estimation
+                geometry = self.calibration_manager.get_camera_geometry()
+                if geometry:
+                    self._camera_center_x = geometry['camera_center_x']
+                    logger.debug(f"Camera center X set to {self._camera_center_x:.1f}")
+
             return CalibrationResult(
                 success=True,
                 method="aruco_geometric_calibration",
                 available_colors=self._get_default_colors(),
                 display_latency_ms=0.0,
                 detection_quality=quality.quality_score if quality.quality_score is not None else 1.0,
-                notes=f"ArUco calibration: {len(detected_markers)} markers, {quality.reprojection_error_rms:.2f}px RMS error"
+                notes=f"ArUco calibration: {len(detected_markers)} markers, {quality.reprojection_error_rms:.2f}px RMS error{color_detection_notes}"
             )
 
         except Exception as e:
@@ -671,6 +945,214 @@ class ObjectDetectionBackend(DetectionBackend):
             detection_quality=0.5,  # Reduced quality without calibration
             notes="No geometric calibration performed - using simple coordinate normalization"
         )
+
+    def _run_projectile_color_detection(
+        self,
+        display_surface,
+        display_resolution: tuple,
+        pygame_module,
+    ) -> Optional[ColorBlobConfig]:
+        """Run projectile color detection step.
+
+        Projects white screen and asks user to fire projectiles.
+        Detects moving objects and samples their HSV color values.
+
+        Args:
+            display_surface: Pygame surface for display
+            display_resolution: (width, height) of display
+            pygame_module: Reference to pygame module
+
+        Returns:
+            ColorBlobConfig with detected HSV range, or None if skipped
+        """
+        print("\n" + "=" * 60)
+        print("Projectile Color Detection")
+        print("=" * 60)
+        print("\nInstructions:")
+        print("1. A white screen will be displayed")
+        print("2. Fire 3-5 projectiles across the screen")
+        print("3. The system will detect and sample projectile colors")
+        print("4. Press SPACE when done, ESC to skip")
+        print("\nStarting color detection...")
+
+        # Create white surface
+        white_surface = pygame_module.Surface(display_resolution)
+        white_surface.fill((255, 255, 255))
+
+        # Tracking state
+        hsv_samples = []  # List of (h, s, v) tuples
+        motion_threshold = 30  # Minimum pixel movement to detect motion
+        prev_frame = None
+        prev_gray = None
+        sample_cooldown = 0.0  # Prevent sampling same projectile multiple times
+
+        clock = pygame_module.time.Clock()
+        running = True
+
+        while running:
+            # Display white screen
+            display_surface.blit(white_surface, (0, 0))
+
+            # Add instruction text
+            font = pygame_module.font.Font(None, 48)
+            text = font.render("Fire projectiles! SPACE=Done ESC=Skip", True, (0, 0, 0))
+            text_rect = text.get_rect(center=(display_resolution[0] // 2, 50))
+            display_surface.blit(text, text_rect)
+
+            # Show sample count
+            sample_text = font.render(f"Samples: {len(hsv_samples)}", True, (0, 100, 0))
+            display_surface.blit(sample_text, (20, display_resolution[1] - 60))
+
+            pygame_module.display.flip()
+
+            # Capture camera frame
+            frame = self.camera.capture_frame()
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+            # Create preview
+            preview = frame.copy()
+            cam_height, cam_width = frame.shape[:2]
+
+            # Motion detection using frame differencing
+            if prev_gray is not None and sample_cooldown <= 0:
+                # Calculate absolute difference
+                diff = cv2.absdiff(prev_gray, gray)
+                _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+
+                # Find moving regions
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+                for contour in contours:
+                    area = cv2.contourArea(contour)
+
+                    # Filter by size (projectiles are typically 100-5000 pixels)
+                    if 100 < area < 5000:
+                        # Get bounding box
+                        x, y, w, h = cv2.boundingRect(contour)
+                        center_x = x + w // 2
+                        center_y = y + h // 2
+
+                        # Sample HSV at center of moving object
+                        # Take a small region around center for more robust sampling
+                        sample_radius = 5
+                        y_start = max(0, center_y - sample_radius)
+                        y_end = min(cam_height, center_y + sample_radius)
+                        x_start = max(0, center_x - sample_radius)
+                        x_end = min(cam_width, center_x + sample_radius)
+
+                        if y_end > y_start and x_end > x_start:
+                            region = hsv[y_start:y_end, x_start:x_end]
+                            mean_hsv = np.mean(region, axis=(0, 1))
+
+                            h_val, s_val, v_val = int(mean_hsv[0]), int(mean_hsv[1]), int(mean_hsv[2])
+
+                            # Filter out white/gray (low saturation) - we want colored projectiles
+                            if s_val > 50:  # Require some saturation
+                                hsv_samples.append((h_val, s_val, v_val))
+                                sample_cooldown = 0.3  # 300ms cooldown
+
+                                print(f"  Sample {len(hsv_samples)}: H={h_val} S={s_val} V={v_val}")
+
+                                # Draw detection on preview
+                                cv2.rectangle(preview, (x, y), (x + w, y + h), (0, 255, 0), 3)
+                                cv2.circle(preview, (center_x, center_y), 10, (0, 0, 255), -1)
+                                cv2.putText(preview, f"H:{h_val} S:{s_val} V:{v_val}",
+                                           (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            # Update cooldown
+            sample_cooldown = max(0, sample_cooldown - 1/30)
+
+            # Draw motion detection areas
+            if prev_gray is not None:
+                diff = cv2.absdiff(prev_gray, gray)
+                _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cv2.drawContours(preview, contours, -1, (255, 255, 0), 1)
+
+            # Show info on preview
+            cv2.putText(preview, f"Samples: {len(hsv_samples)} | SPACE=Done ESC=Skip",
+                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            # Show current HSV range if we have samples
+            if hsv_samples:
+                h_vals = [s[0] for s in hsv_samples]
+                s_vals = [s[1] for s in hsv_samples]
+                v_vals = [s[2] for s in hsv_samples]
+
+                h_min, h_max = min(h_vals), max(h_vals)
+                s_min, s_max = min(s_vals), max(s_vals)
+                v_min, v_max = min(v_vals), max(v_vals)
+
+                cv2.putText(preview, f"H: {h_min}-{h_max} | S: {s_min}-{s_max} | V: {v_min}-{v_max}",
+                           (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+
+            cv2.imshow("Projectile Color Detection", preview)
+
+            # Store current frame for next iteration
+            prev_gray = gray.copy()
+            prev_frame = frame.copy()
+
+            # Handle pygame events
+            for event in pygame_module.event.get():
+                if event.type == pygame_module.KEYDOWN:
+                    if event.key == pygame_module.K_SPACE:
+                        running = False
+                    elif event.key == pygame_module.K_ESCAPE:
+                        print("Color detection skipped")
+                        cv2.destroyAllWindows()
+                        return None
+
+            # Handle CV window events
+            key = cv2.waitKey(1) & 0xFF
+            if key == 32:  # SPACE
+                running = False
+            elif key == 27:  # ESC
+                print("Color detection skipped")
+                cv2.destroyAllWindows()
+                return None
+
+            clock.tick(30)
+
+        cv2.destroyAllWindows()
+
+        # Process samples and create config
+        if len(hsv_samples) < 2:
+            print("Not enough samples collected, using defaults")
+            return None
+
+        # Calculate HSV range from samples with some padding
+        h_vals = [s[0] for s in hsv_samples]
+        s_vals = [s[1] for s in hsv_samples]
+        v_vals = [s[2] for s in hsv_samples]
+
+        # Add padding to range (HSV detection works better with some tolerance)
+        h_padding = 10
+        s_padding = 30
+        v_padding = 30
+
+        h_min = max(0, min(h_vals) - h_padding)
+        h_max = min(179, max(h_vals) + h_padding)
+        s_min = max(0, min(s_vals) - s_padding)
+        s_max = min(255, max(s_vals) + s_padding)
+        v_min = max(0, min(v_vals) - v_padding)
+        v_max = 255  # Always allow bright objects
+
+        print(f"\nDetected HSV range:")
+        print(f"  Hue: {h_min} - {h_max}")
+        print(f"  Saturation: {s_min} - {s_max}")
+        print(f"  Value: {v_min} - {v_max}")
+
+        config = ColorBlobConfig(
+            hue_min=h_min,
+            hue_max=h_max,
+            saturation_min=s_min,
+            saturation_max=s_max,
+            value_min=v_min,
+            value_max=v_max,
+        )
+
+        return config
 
     def _get_default_colors(self):
         """Get default color palette."""

@@ -5,15 +5,27 @@ with dev_game.py, ams_game.py, and the game registry.
 
 Game metadata (NAME, DESCRIPTION, etc.) and CLI arguments (ARGUMENTS)
 are declared as class attributes, making them part of the plugin architecture.
+
+Level Support:
+Games can opt-in to YAML-based level support by:
+1. Setting LEVELS_DIR class attribute to their levels directory
+2. Implementing _create_level_loader() to return a game-specific loader
+3. Implementing _apply_level_config() to apply level data to game state
+
+Level groups (campaigns, tutorials) are also supported - see games/common/levels.py.
 """
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import pygame
 
 from games.common.game_state import GameState
 from games.common.palette import GamePalette
 from games.common.quiver import QuiverState, create_quiver
+
+if TYPE_CHECKING:
+    from games.common.levels import LevelLoader, LevelGroup
 
 
 class BaseGame(ABC):
@@ -80,6 +92,10 @@ class BaseGame(ABC):
     #   ]
     ARGUMENTS: List[Dict[str, Any]] = []
 
+    # Level support - set LEVELS_DIR to enable level loading
+    # Should be Path(__file__).parent / 'levels' in subclasses
+    LEVELS_DIR: Optional[Path] = None
+
     # =========================================================================
     # Standard Arguments (automatically available to all games)
     # Subclasses can extend ARGUMENTS but these are always included
@@ -106,13 +122,41 @@ class BaseGame(ABC):
         },
     ]
 
+    # Level-related arguments (only included if LEVELS_DIR is set)
+    _LEVEL_ARGUMENTS: List[Dict[str, Any]] = [
+        {
+            'name': '--level',
+            'type': str,
+            'default': None,
+            'help': 'Level to play (slug or path to YAML)'
+        },
+        {
+            'name': '--list-levels',
+            'action': 'store_true',
+            'default': False,
+            'help': 'List available levels and exit'
+        },
+        {
+            'name': '--level-group',
+            'type': str,
+            'default': None,
+            'help': 'Play through a level group (campaign, tutorial, etc.)'
+        },
+        {
+            'name': '--choose-level',
+            'action': 'store_true',
+            'default': False,
+            'help': 'Show level chooser UI before starting'
+        },
+    ]
+
     @classmethod
     def get_arguments(cls) -> List[Dict[str, Any]]:
-        """Get all CLI arguments for this game (game-specific + base).
+        """Get all CLI arguments for this game (game-specific + base + level).
 
         Returns list of argument definitions suitable for argparse.
-        Game-specific arguments come first, then base arguments.
-        Duplicates by name are removed (game-specific takes precedence).
+        Game-specific arguments come first, then level args (if LEVELS_DIR set),
+        then base arguments. Duplicates by name are removed (game-specific takes precedence).
         """
         # Collect argument names from game-specific args
         seen_names = set()
@@ -124,6 +168,14 @@ class BaseGame(ABC):
             if name and name not in seen_names:
                 seen_names.add(name)
                 result.append(arg)
+
+        # Level arguments if LEVELS_DIR is set
+        if cls.LEVELS_DIR is not None:
+            for arg in cls._LEVEL_ARGUMENTS:
+                name = arg.get('name', '')
+                if name and name not in seen_names:
+                    seen_names.add(name)
+                    result.append(arg)
 
         # Then base arguments (skip if already defined)
         for arg in cls._BASE_ARGUMENTS:
@@ -162,6 +214,11 @@ class BaseGame(ABC):
         # Quiver support
         quiver_size: Optional[int] = None,
         retrieval_pause: int = 30,
+        # Level support
+        level: Optional[str] = None,
+        level_group: Optional[str] = None,
+        list_levels: bool = False,
+        choose_level: bool = False,
         **kwargs,
     ):
         """Initialize base game.
@@ -172,6 +229,10 @@ class BaseGame(ABC):
             palette: Alias for palette_name (CLI arg name)
             quiver_size: Shots before retrieval (None = unlimited)
             retrieval_pause: Seconds for retrieval (0 = manual)
+            level: Level slug to load (if game has levels)
+            level_group: Level group/campaign to play through
+            list_levels: Print available levels and exit
+            choose_level: Show level chooser UI before starting
         """
         # Palette management (accept either palette_name or palette)
         effective_palette = palette_name or palette
@@ -182,6 +243,22 @@ class BaseGame(ABC):
 
         # Track if in retrieval state
         self._in_retrieval = False
+
+        # Level support
+        self._level_loader: Optional['LevelLoader'] = None
+        self._current_level_slug: Optional[str] = None
+        self._current_level_data: Any = None
+        self._current_group: Optional['LevelGroup'] = None
+        self._show_level_chooser = False
+
+        # Initialize level support if LEVELS_DIR is set
+        if self.LEVELS_DIR is not None:
+            self._init_level_support(
+                level=level,
+                level_group=level_group,
+                list_levels=list_levels,
+                choose_level=choose_level,
+            )
 
     @property
     def state(self) -> GameState:
@@ -338,3 +415,250 @@ class BaseGame(ABC):
         self._in_retrieval = False
         if self._quiver:
             self._quiver.end_retrieval()
+
+    # =========================================================================
+    # Game Actions (for web controller UI)
+    # =========================================================================
+
+    def get_available_actions(self) -> List[Dict[str, Any]]:
+        """Get list of actions currently available to the player.
+
+        Returns a list of action definitions that the web controller can
+        display as buttons. Each action has:
+        - id: Unique identifier (e.g., 'retry', 'skip', 'next_level')
+        - label: Display text (e.g., 'Retry Level')
+        - style: Optional style hint ('primary', 'secondary', 'danger')
+
+        Override this in subclasses to provide game-specific actions.
+        Base implementation returns empty list.
+
+        Example:
+            def get_available_actions(self):
+                actions = []
+                if self._level_state == LevelState.LOST:
+                    actions.append({'id': 'retry', 'label': 'Retry', 'style': 'primary'})
+                    actions.append({'id': 'skip', 'label': 'Skip Level', 'style': 'secondary'})
+                return actions
+        """
+        return []
+
+    def execute_action(self, action_id: str) -> bool:
+        """Execute a game action by ID.
+
+        Called when player triggers an action from the web UI.
+        Override this in subclasses to handle game-specific actions.
+
+        Args:
+            action_id: The action identifier (e.g., 'retry', 'skip')
+
+        Returns:
+            True if action was handled, False otherwise
+        """
+        return False
+
+    # =========================================================================
+    # Level Support
+    # =========================================================================
+
+    def _init_level_support(
+        self,
+        level: Optional[str] = None,
+        level_group: Optional[str] = None,
+        list_levels: bool = False,
+        choose_level: bool = False,
+    ) -> None:
+        """Initialize level support.
+
+        Called automatically if LEVELS_DIR is set.
+
+        Args:
+            level: Level slug to load
+            level_group: Level group slug to load
+            list_levels: Print level list and exit
+            choose_level: Show level chooser UI
+        """
+        # Create loader
+        self._level_loader = self._create_level_loader()
+        self._show_level_chooser = choose_level and level is None and level_group is None
+
+        # Handle list-levels request
+        if list_levels:
+            self._print_levels()
+            import sys
+            sys.exit(0)
+
+        # Load level group if specified
+        if level_group and self._level_loader:
+            try:
+                self._current_group = self._level_loader.load_group(level_group)
+                level = self._current_group.current_level
+            except (FileNotFoundError, ValueError) as e:
+                print(f"Failed to load level group '{level_group}': {e}")
+
+        # Load specific level if specified
+        if level and self._level_loader:
+            self._load_level(level)
+
+    def _create_level_loader(self) -> Optional['LevelLoader']:
+        """Create the level loader instance.
+
+        Override in subclass to return a game-specific loader.
+        Default returns SimpleLevelLoader.
+
+        Returns:
+            LevelLoader instance, or None if LEVELS_DIR not set
+        """
+        if self.LEVELS_DIR is None or not self.LEVELS_DIR.exists():
+            return None
+
+        from games.common.levels import SimpleLevelLoader
+        return SimpleLevelLoader(self.LEVELS_DIR)
+
+    def _load_level(self, slug: str) -> bool:
+        """Load a level by slug.
+
+        Args:
+            slug: Level identifier
+
+        Returns:
+            True if loaded successfully
+        """
+        if not self._level_loader:
+            return False
+
+        try:
+            self._current_level_data = self._level_loader.load_level(slug)
+            self._current_level_slug = slug
+            self._apply_level_config(self._current_level_data)
+            return True
+        except (FileNotFoundError, ValueError) as e:
+            print(f"Failed to load level '{slug}': {e}")
+            return False
+
+    def _apply_level_config(self, level_data: Any) -> None:
+        """Apply loaded level configuration to game state.
+
+        Override in subclass to handle game-specific level setup.
+
+        Args:
+            level_data: The loaded level data object
+        """
+        pass  # Default: no-op, subclass implements
+
+    def _advance_to_next_level(self) -> bool:
+        """Advance to next level in group (if playing a group).
+
+        Internal method - games should call _level_complete() instead.
+
+        Returns:
+            True if advanced to next level, False if group complete or no group
+        """
+        if not self._current_group:
+            return False
+
+        next_level = self._current_group.advance()
+        if next_level:
+            return self._load_level(next_level)
+
+        return False
+
+    def _level_complete(self) -> bool:
+        """Called when a level is completed successfully.
+
+        Games should call this when the player beats a level. This method:
+        1. Checks if there's a next level in the group
+        2. If yes, loads it and calls _on_level_transition()
+        3. If no, returns False (game should transition to WON state)
+
+        Future: This will also handle:
+        - Pause for target clearance
+        - Quick recalibration between levels
+        - Level transition animations
+
+        Returns:
+            True if transitioned to next level, False if no more levels
+        """
+        if self._advance_to_next_level():
+            self._on_level_transition()
+            return True
+        return False
+
+    def _on_level_transition(self) -> None:
+        """Called when transitioning to a new level.
+
+        Override this to reinitialize game state for the new level.
+        The new level data is already loaded via _apply_level_config().
+
+        Default implementation does nothing - subclasses should override
+        to reset physics, clear entities, etc.
+        """
+        pass
+
+    def _print_levels(self) -> None:
+        """Print available levels to stdout."""
+        if not self._level_loader:
+            print("No levels directory configured")
+            return
+
+        print(f"\nAvailable levels for {self.NAME}:")
+        print("-" * 50)
+
+        levels = self._level_loader.list_levels()
+        for slug in levels:
+            info = self._level_loader.get_level_info(slug)
+            if info:
+                diff_str = "*" * info.difficulty
+                print(f"  {slug:24} [{diff_str:5}] {info.name}")
+            else:
+                print(f"  {slug}")
+
+        groups = self._level_loader.list_groups()
+        if groups:
+            print("\nLevel groups:")
+            print("-" * 50)
+            for slug in groups:
+                info = self._level_loader.get_level_info(slug)
+                if info:
+                    count = len(info.levels)
+                    print(f"  {slug:24} ({count} levels) {info.name}")
+                else:
+                    print(f"  {slug}")
+
+        if not levels and not groups:
+            print("  (no levels found)")
+
+        print()
+
+    @property
+    def current_level_name(self) -> str:
+        """Get current level display name."""
+        if self._level_loader and self._current_level_slug:
+            info = self._level_loader.get_level_info(self._current_level_slug)
+            if info:
+                return info.name
+        return ""
+
+    @property
+    def current_level_slug(self) -> Optional[str]:
+        """Get current level slug."""
+        return self._current_level_slug
+
+    @property
+    def current_group(self) -> Optional['LevelGroup']:
+        """Get current level group (if playing a group)."""
+        return self._current_group
+
+    @property
+    def has_levels(self) -> bool:
+        """Check if this game has level support configured."""
+        return self._level_loader is not None
+
+    @property
+    def show_level_chooser(self) -> bool:
+        """Check if level chooser UI should be shown."""
+        return self._show_level_chooser
+
+    @show_level_chooser.setter
+    def show_level_chooser(self, value: bool) -> None:
+        """Set whether level chooser UI should be shown."""
+        self._show_level_chooser = value
