@@ -117,6 +117,7 @@ class WebController:
         host: str = "0.0.0.0",
         port: int = 8080,
         static_dir: Optional[Path] = None,
+        pygbag_dir: Optional[Path] = None,
     ):
         """
         Initialize web controller.
@@ -125,10 +126,14 @@ class WebController:
             host: Host to bind to (0.0.0.0 for all interfaces)
             port: Port to serve on
             static_dir: Directory containing frontend static files
+            pygbag_dir: Directory containing pygbag WASM build (build/web)
         """
         self.host = host
         self.port = port
         self.static_dir = static_dir or (Path(__file__).parent / "frontend" / "dist")
+        # Default pygbag dir is build/web relative to project root
+        project_root = Path(__file__).parent.parent.parent
+        self.pygbag_dir = pygbag_dir or (project_root / "build" / "web")
 
         self._app = FastAPI(title="AMS Web Controller")
         self._manager = ConnectionManager()
@@ -157,6 +162,25 @@ class WebController:
             # Fallback: simple status page
             return HTMLResponse(content=self._get_fallback_html())
 
+        @self._app.get("/play")
+        @self._app.get("/play.html")
+        async def play_page():
+            """Serve Play mode page."""
+            play_path = self.static_dir / "play.html"
+            if play_path.exists():
+                return HTMLResponse(content=play_path.read_text())
+
+            # Fallback for when frontend not built
+            return HTMLResponse(content="""
+<!DOCTYPE html>
+<html><head><title>Play Mode</title></head>
+<body style="background:#1a1a2e;color:#eee;font-family:sans-serif;padding:20px;text-align:center;">
+<h1 style="color:#00d9ff;">Play Mode</h1>
+<p>Frontend not built. Run: cd ams/web_controller/frontend && npm run build</p>
+<a href="/" style="color:#00d9ff;">Back to Controller</a>
+</body></html>
+""")
+
         @self._app.get("/api/state")
         async def get_state():
             """Get current game state (REST fallback)."""
@@ -171,6 +195,20 @@ class WebController:
         async def health():
             """Health check endpoint."""
             return {"status": "ok", "connections": self._manager.connection_count}
+
+        @self._app.get("/api/levels/{game_slug}")
+        async def get_levels(game_slug: str):
+            """Get levels and level groups for a game (for Play mode)."""
+            levels = []
+            groups = []
+
+            # Try to find levels from game_info in session
+            if game_slug in self._session_info.game_info:
+                info = self._session_info.game_info[game_slug]
+                levels = info.get("levels", [])
+                groups = info.get("level_groups", [])
+
+            return {"levels": levels, "groups": groups}
 
         @self._app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
@@ -191,6 +229,11 @@ class WebController:
                     await self._handle_command(websocket, data)
             except WebSocketDisconnect:
                 self._manager.disconnect(websocket)
+
+        # Mount pygbag WASM files at /pygbag
+        if self.pygbag_dir.exists():
+            self._app.mount("/pygbag", StaticFiles(directory=self.pygbag_dir), name="pygbag")
+            logger.info(f"Serving pygbag from {self.pygbag_dir}")
 
         # Mount static files if directory exists
         if self.static_dir.exists():

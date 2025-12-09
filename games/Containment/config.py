@@ -1,14 +1,20 @@
 """Configuration for Containment game."""
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
 
-from dotenv import load_dotenv
-
-# Load .env from game directory
-_env_path = Path(__file__).parent / '.env'
-load_dotenv(_env_path)
+# dotenv is optional - not available in WASM/browser environment
+# In browser, we use defaults (no .env files)
+if sys.platform != "emscripten":
+    try:
+        from dotenv import load_dotenv
+        # Load .env from game directory
+        _env_path = Path(__file__).parent / '.env'
+        load_dotenv(_env_path)
+    except ImportError:
+        pass  # dotenv not installed, use defaults
 
 
 def _get_bool(key: str, default: bool) -> bool:

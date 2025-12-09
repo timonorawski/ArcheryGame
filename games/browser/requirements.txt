@@ -1,0 +1,14 @@
+# Browser deployment dependencies
+# These are bundled by pygbag for WASM execution
+
+# Core game engine
+pygame-ce>=2.4.0
+
+# Physics (supported by pygbag)
+pymunk>=6.6.0
+
+# Level loading
+pyyaml>=6.0
+
+# Build tool (not bundled, used for compilation)
+pygbag>=0.9.0

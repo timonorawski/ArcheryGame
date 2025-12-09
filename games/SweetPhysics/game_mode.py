@@ -3,12 +3,31 @@ Sweet Physics - Cut the Rope style physics puzzle game.
 
 Hit targets to manipulate physics elements and guide candy to the goal.
 """
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+def _browser_log(msg):
+    print(msg)
+    if sys.platform == "emscripten":
+        try:
+            import platform
+            platform.window.console.log(msg)
+        except:
+            pass
+
+_browser_log("[SweetPhysics game_mode.py] Starting imports...")
+
 import pygame
-import pymunk
+_browser_log("[SweetPhysics game_mode.py] pygame OK")
+
+try:
+    import pymunk
+    _browser_log("[SweetPhysics game_mode.py] pymunk OK")
+except Exception as e:
+    _browser_log(f"[SweetPhysics game_mode.py] pymunk FAILED: {e}")
+    raise
 
 from games.common import GameState
 from games.common.base_game import BaseGame

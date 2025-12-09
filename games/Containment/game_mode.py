@@ -4,36 +4,84 @@ Adversarial containment game where a ball tries to escape through gaps.
 Player places deflectors to build walls and contain the ball.
 Direct hits on the ball are penalized (it speeds up).
 """
-import math
-import random
-from pathlib import Path
-from typing import List, Optional, Tuple
+import sys
 
-import pygame
+def _browser_log(msg):
+    """Log to browser console if in WASM."""
+    print(msg)
+    if sys.platform == "emscripten":
+        try:
+            import platform
+            platform.window.console.log(msg)
+        except:
+            pass
 
-from models import Vector2D
-from games.common import GameState
-from games.common.base_game import BaseGame
-from games.Containment.ball import Ball, create_ball
-from games.Containment.deflector import Deflector, DeflectorManager, create_deflector
-from games.Containment.gap import GapManager
-from games.Containment.spinner import SpinnerManager, create_spinner
-from games.Containment.grow_obstacle import GrowObstacle
-from games.Containment.morph_obstacle import MorphObstacle, create_morph_obstacle
-from games.Containment import config
-from games.common.levels import LevelLoader
-from games.Containment.levels import (
-    ContainmentLevelLoader,
-    LevelConfig,
-    load_level,
-    apply_pacing_overrides,
-    list_levels,
-    get_levels_dir,
-    resolve_hit_mode_angle,
-    resolve_random_value,
-    shape_name_to_sides,
-)
-from games.Containment.level_chooser import LevelChooser
+_browser_log("[game_mode.py] Starting imports...")
+
+try:
+    import math
+    import random
+    from pathlib import Path
+    from typing import List, Optional, Tuple
+    _browser_log("[game_mode.py] stdlib imports OK")
+
+    import pygame
+    _browser_log("[game_mode.py] pygame import OK")
+
+    from models import Vector2D
+    _browser_log("[game_mode.py] models.Vector2D import OK")
+
+    from games.common import GameState
+    _browser_log("[game_mode.py] GameState import OK")
+
+    from games.common.base_game import BaseGame
+    _browser_log("[game_mode.py] BaseGame import OK")
+
+    from games.Containment.ball import Ball, create_ball
+    _browser_log("[game_mode.py] ball import OK")
+
+    from games.Containment.deflector import Deflector, DeflectorManager, create_deflector
+    _browser_log("[game_mode.py] deflector import OK")
+
+    from games.Containment.gap import GapManager
+    _browser_log("[game_mode.py] gap import OK")
+
+    from games.Containment.spinner import SpinnerManager, create_spinner
+    _browser_log("[game_mode.py] spinner import OK")
+
+    from games.Containment.grow_obstacle import GrowObstacle
+    _browser_log("[game_mode.py] grow_obstacle import OK")
+
+    from games.Containment.morph_obstacle import MorphObstacle, create_morph_obstacle
+    _browser_log("[game_mode.py] morph_obstacle import OK")
+
+    from games.Containment import config
+    _browser_log("[game_mode.py] config import OK")
+
+    from games.common.levels import LevelLoader
+    _browser_log("[game_mode.py] LevelLoader import OK")
+
+    from games.Containment.levels import (
+        ContainmentLevelLoader,
+        LevelConfig,
+        load_level,
+        apply_pacing_overrides,
+        list_levels,
+        get_levels_dir,
+        resolve_hit_mode_angle,
+        resolve_random_value,
+        shape_name_to_sides,
+    )
+    _browser_log("[game_mode.py] levels import OK")
+
+    from games.Containment.level_chooser import LevelChooser
+    _browser_log("[game_mode.py] All imports complete!")
+
+except Exception as e:
+    import traceback
+    _browser_log(f"[game_mode.py] IMPORT ERROR: {e}")
+    _browser_log(traceback.format_exc())
+    raise
 
 
 class ContainmentMode(BaseGame):

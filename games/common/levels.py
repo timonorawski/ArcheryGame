@@ -22,10 +22,43 @@ Example level group (campaign.yaml):
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional, Type, TypeVar, Generic
 
-import yaml
+# YAML is optional - not available in WASM/browser environment
+# Browser builds use JSON files converted from YAML during build
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+    yaml = None  # type: ignore
+
+
+def _load_data_file(path: Path) -> Dict[str, Any]:
+    """Load data from YAML or JSON file.
+
+    In browser environment, uses JSON. In native environment, uses YAML.
+    """
+    # Check for JSON version first (browser-compatible)
+    json_path = path.with_suffix('.json')
+    if json_path.exists():
+        with open(json_path, 'r') as f:
+            return json.load(f) or {}
+
+    # Fall back to YAML if available
+    if path.suffix == '.yaml' and path.exists():
+        if not HAS_YAML:
+            raise ImportError(
+                f"Cannot load {path}: PyYAML not available. "
+                "In browser builds, use JSON files instead."
+            )
+        with open(path, 'r') as f:
+            return yaml.safe_load(f) or {}
+
+    raise FileNotFoundError(f"No data file found: {path}")
 
 
 # =============================================================================
@@ -166,16 +199,17 @@ class LevelLoader(Generic[T], ABC):
         if not search_dir.exists():
             return []
 
-        levels = []
-        for path in search_dir.rglob("*.yaml"):
-            # Skip hidden files and groups
-            if path.name.startswith("_") or path.name.startswith("."):
-                continue
+        levels = set()  # Use set to avoid duplicates from .yaml and .json
+        for ext in ['*.yaml', '*.json']:
+            for path in search_dir.rglob(ext):
+                # Skip hidden files and groups
+                if path.name.startswith("_") or path.name.startswith("."):
+                    continue
 
-            # Check if it's a group file
-            info = self.get_level_info(path.stem)
-            if info and not info.is_group:
-                levels.append(path.stem)
+                # Check if it's a group file
+                info = self.get_level_info(path.stem)
+                if info and not info.is_group:
+                    levels.add(path.stem)
 
         return sorted(levels)
 
@@ -188,14 +222,15 @@ class LevelLoader(Generic[T], ABC):
         if not self._levels_dir.exists():
             return []
 
-        groups = []
-        for path in self._levels_dir.rglob("*.yaml"):
-            if path.name.startswith("_") or path.name.startswith("."):
-                continue
+        groups = set()  # Use set to avoid duplicates from .yaml and .json
+        for ext in ['*.yaml', '*.json']:
+            for path in self._levels_dir.rglob(ext):
+                if path.name.startswith("_") or path.name.startswith("."):
+                    continue
 
-            info = self.get_level_info(path.stem)
-            if info and info.is_group:
-                groups.append(path.stem)
+                info = self.get_level_info(path.stem)
+                if info and info.is_group:
+                    groups.add(path.stem)
 
         return sorted(groups)
 
@@ -216,8 +251,7 @@ class LevelLoader(Generic[T], ABC):
             return None
 
         try:
-            with open(path, 'r') as f:
-                data = yaml.safe_load(f) or {}
+            data = _load_data_file(path)
 
             is_group = data.get('group', False)
 
@@ -256,8 +290,7 @@ class LevelLoader(Generic[T], ABC):
         if not path:
             raise FileNotFoundError(f"Level not found: {slug}")
 
-        with open(path, 'r') as f:
-            data = yaml.safe_load(f)
+        data = _load_data_file(path)
 
         if not data:
             raise ValueError(f"Empty level file: {slug}")
@@ -289,8 +322,7 @@ class LevelLoader(Generic[T], ABC):
         if not path:
             raise FileNotFoundError(f"Level group not found: {slug}")
 
-        with open(path, 'r') as f:
-            data = yaml.safe_load(f)
+        data = _load_data_file(path)
 
         if not data:
             raise ValueError(f"Empty group file: {slug}")
@@ -314,6 +346,7 @@ class LevelLoader(Generic[T], ABC):
         """Find the level file for a slug.
 
         Searches in the levels directory and common subdirectories.
+        Checks for both .yaml and .json extensions.
 
         Args:
             slug: Level identifier
@@ -321,21 +354,27 @@ class LevelLoader(Generic[T], ABC):
         Returns:
             Path to level file, or None if not found
         """
+        # Check both extensions (.json preferred for browser compatibility)
+        extensions = ['.json', '.yaml']
+
         # Direct path
-        direct = self._levels_dir / f"{slug}.yaml"
-        if direct.exists():
-            return direct
+        for ext in extensions:
+            direct = self._levels_dir / f"{slug}{ext}"
+            if direct.exists():
+                return direct
 
         # Check subdirectories
         subdirs = ['tutorial', 'campaign', 'challenge', 'examples', 'custom']
         for subdir in subdirs:
-            path = self._levels_dir / subdir / f"{slug}.yaml"
-            if path.exists():
-                return path
+            for ext in extensions:
+                path = self._levels_dir / subdir / f"{slug}{ext}"
+                if path.exists():
+                    return path
 
         # Search recursively as last resort
-        for path in self._levels_dir.rglob(f"{slug}.yaml"):
-            return path
+        for ext in extensions:
+            for path in self._levels_dir.rglob(f"{slug}{ext}"):
+                return path
 
         return None
 

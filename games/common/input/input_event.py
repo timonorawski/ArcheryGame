@@ -2,13 +2,14 @@
 Input Event - Represents a single input action.
 
 This is a shared module used by all games.
-Uses Pydantic for validation and immutability.
+Uses dataclass for immutability (Pydantic not available in WASM).
 """
-from pydantic import BaseModel, field_validator, ConfigDict
+from dataclasses import dataclass
 from models import Vector2D, EventType
 
 
-class InputEvent(BaseModel):
+@dataclass(frozen=True)
+class InputEvent:
     """Immutable input event from any source.
 
     Represents a single input action (hit or miss) at a specific position and time.
@@ -23,15 +24,10 @@ class InputEvent(BaseModel):
     timestamp: float
     event_type: EventType = EventType.HIT
 
-    @field_validator('timestamp')
-    @classmethod
-    def validate_timestamp(cls, v: float) -> float:
+    def __post_init__(self):
         """Validate timestamp is non-negative."""
-        if v < 0:
-            raise ValueError(f'Timestamp must be non-negative, got {v}')
-        return v
-
-    model_config = ConfigDict(frozen=True)
+        if self.timestamp < 0:
+            raise ValueError(f'Timestamp must be non-negative, got {self.timestamp}')
 
     def __str__(self) -> str:
         """String representation for debugging."""

@@ -1,8 +1,9 @@
 """Level loader for Containment game.
 
-Parses YAML level definitions and provides level configuration to the game.
+Parses YAML/JSON level definitions and provides level configuration to the game.
 See schema.md for the full YAML format specification.
 """
+import json
 import os
 import math
 import random
@@ -10,7 +11,35 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import yaml
+# YAML is optional - not available in WASM/browser environment
+# Browser builds use JSON files converted from YAML during build
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+    yaml = None  # type: ignore
+
+
+def _load_level_file(path: Path) -> Dict[str, Any]:
+    """Load level data from YAML or JSON file."""
+    # Check for JSON version first (browser-compatible)
+    json_path = path.with_suffix('.json')
+    if json_path.exists():
+        with open(json_path, 'r') as f:
+            return json.load(f) or {}
+
+    # Fall back to YAML if available
+    if path.suffix == '.yaml' and path.exists():
+        if not HAS_YAML:
+            raise ImportError(
+                f"Cannot load {path}: PyYAML not available. "
+                "In browser builds, use JSON files instead."
+            )
+        with open(path, 'r') as f:
+            return yaml.safe_load(f) or {}
+
+    raise FileNotFoundError(f"No level file found: {path}")
 
 
 # =============================================================================
@@ -277,8 +306,7 @@ def load_level(path: Union[str, Path]) -> LevelConfig:
     """
     path = Path(path)
 
-    with open(path, 'r') as f:
-        data = yaml.safe_load(f)
+    data = _load_level_file(path)
 
     if not data:
         return LevelConfig()
@@ -377,11 +405,15 @@ def list_levels(category: Optional[str] = None) -> List[Path]:
         return []
 
     levels = []
-    for path in search_dir.rglob("*.yaml"):
-        # Skip schema.md and other non-level files
-        if path.name.startswith("_"):
-            continue
-        levels.append(path)
+    seen_stems = set()  # Avoid duplicates if both .yaml and .json exist
+    for ext in ["*.json", "*.yaml"]:  # Check JSON first (browser-compatible)
+        for path in search_dir.rglob(ext):
+            # Skip schema.md and other non-level files
+            if path.name.startswith("_"):
+                continue
+            if path.stem not in seen_stems:
+                levels.append(path)
+                seen_stems.add(path.stem)
 
     return sorted(levels)
 
@@ -397,8 +429,7 @@ def get_level_info(path: Union[str, Path]) -> Dict[str, Any]:
     """
     path = Path(path)
 
-    with open(path, 'r') as f:
-        data = yaml.safe_load(f)
+    data = _load_level_file(path)
 
     if not data:
         return {
