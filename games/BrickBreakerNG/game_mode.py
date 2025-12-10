@@ -178,55 +178,10 @@ class BrickBreakerNGMode(GameEngine):
         # Ball will be reset by _apply_level_config
         pass
 
-    def _spawn_initial_entities(self) -> None:
-        """Spawn paddle_ready and bricks when no level specified."""
-        # Spawn paddle_ready (composite entity: paddle with ball attached)
-        paddle_ready = self.spawn_entity(
-            'paddle_ready',
-            x=(self._screen_width - 120) / 2,
-            y=self._screen_height - 50,
-        )
-        if paddle_ready:
-            self._paddle_id = paddle_ready.id
-
-        # Spawn bricks (5 rows x 10 cols)
-        self._spawn_default_bricks()
-
-    def _spawn_default_bricks(self) -> None:
-        """Spawn default brick layout."""
-        colors = ['red', 'orange', 'yellow', 'green', 'blue']
-        rows = 5
-        cols = 10
-        brick_width = 70
-        brick_height = 25
-        start_y = 60
-
-        total_width = cols * brick_width
-        start_x = (self._screen_width - total_width) / 2
-
-        for row in range(rows):
-            color = colors[row % len(colors)]
-            points = 100 * (rows - row)
-
-            for col in range(cols):
-                x = start_x + col * brick_width
-                y = start_y + row * brick_height
-
-                self._behavior_engine.create_entity(
-                    entity_type='brick',
-                    x=x,
-                    y=y,
-                    width=brick_width,
-                    height=brick_height,
-                    color=color,
-                    behaviors=['brick'],
-                    behavior_config={'brick': {'hits': 1, 'points': points}},
-                )
-
-    # Input handling, collision detection, and lose conditions
-    # are all handled declaratively by GameEngine using:
-    # - input_mapping from game.yaml
-    # - collision_behaviors from game.yaml
-    # - lose_conditions from game.yaml
-    #
-    # Win conditions handled by GameEngine using win_target_type from game.yaml
+    # All game logic is now handled declaratively by GameEngine:
+    # - player spawn: player.type + player.spawn in game.yaml
+    # - default layout: default_layout.brick_grid in game.yaml
+    # - input mapping: input_mapping in game.yaml
+    # - collision behaviors: collision_behaviors in game.yaml
+    # - lose conditions: lose_conditions in game.yaml
+    # - win conditions: win_target_type in game.yaml

@@ -164,8 +164,8 @@ class GameDefinition:
     win_target_type: Optional[str] = None  # For destroy_all: base type to destroy
     lose_on_player_death: bool = True
 
-    # Level spawning (for games without explicit levels)
-    spawn_patterns: List[Dict[str, Any]] = field(default_factory=list)
+    # Default layout (used when no level specified)
+    default_layout: Optional[Dict[str, Any]] = None
 
 
 class GameEngineSkin:
@@ -426,7 +426,7 @@ class GameEngine(BaseGame):
             win_target=data.get('win_target', 0),
             win_target_type=data.get('win_target_type'),
             lose_on_player_death=data.get('lose_on_player_death', True),
-            spawn_patterns=data.get('spawn_patterns', []),
+            default_layout=data.get('default_layout'),
         )
 
         # First pass: parse all entity types
@@ -655,12 +655,57 @@ class GameEngine(BaseGame):
         return GameEngineSkin()
 
     def _spawn_initial_entities(self) -> None:
-        """Spawn initial entities for the game.
+        """Spawn initial entities from game.yaml config.
 
-        Override to create starting game state.
-        Default does nothing.
+        Uses player.type + player.spawn and default_layout if present.
+        Override for custom spawning logic.
         """
-        pass
+        if not self._game_def:
+            return
+
+        # Spawn player entity
+        if self._game_def.player_type:
+            player = self.spawn_entity(
+                self._game_def.player_type,
+                x=self._game_def.player_spawn[0],
+                y=self._game_def.player_spawn[1],
+            )
+            if player:
+                self._player_id = player.id
+
+        # Spawn default layout if present
+        self._spawn_default_layout()
+
+    def _spawn_default_layout(self) -> None:
+        """Spawn entities from default_layout in game.yaml."""
+        if not self._game_def or not self._game_def.default_layout:
+            return
+
+        layout = self._game_def.default_layout
+
+        # Parse brick_grid if present
+        brick_grid = layout.get('brick_grid')
+        if brick_grid:
+            start_x = brick_grid.get('start_x', 65)
+            start_y = brick_grid.get('start_y', 60)
+            cols = brick_grid.get('cols', 10)
+            rows = brick_grid.get('rows', 5)
+            row_types = brick_grid.get('row_types', ['brick'])
+
+            # Get brick dimensions from first row type
+            first_type = row_types[0] if row_types else 'brick'
+            type_config = self._game_def.entity_types.get(first_type)
+            brick_width = type_config.width if type_config else 70
+            brick_height = type_config.height if type_config else 25
+
+            # Spawn grid
+            for row in range(rows):
+                # Get entity type for this row (cycle through row_types)
+                entity_type = row_types[row % len(row_types)] if row_types else 'brick'
+                for col in range(cols):
+                    x = start_x + col * brick_width
+                    y = start_y + row * brick_height
+                    self.spawn_entity(entity_type, x, y)
 
     def spawn_entity(
         self,

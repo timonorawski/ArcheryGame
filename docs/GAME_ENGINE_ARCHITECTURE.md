@@ -68,8 +68,17 @@ lose_conditions:
 
 # Player spawn config
 player:
-  type: paddle
-  spawn: [400, 550]
+  type: paddle_ready
+  spawn: [340, 550]
+
+# Default layout (used when no level specified)
+default_layout:
+  brick_grid:
+    start_x: 65
+    start_y: 60
+    cols: 10
+    rows: 5
+    row_types: [brick_blue, brick_green, brick_yellow, brick_orange, brick_red]
 ```
 
 ### Entity Types
