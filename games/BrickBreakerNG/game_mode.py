@@ -11,16 +11,21 @@ All game logic is in Lua behaviors:
 - ball: Bouncing ball with velocity
 - brick: Destructible with multi-hit support
 - descend, oscillate, shoot: Brick modifiers
+
+Game definition in game.yaml defines entity types.
+Level YAML files define brick layouts using ASCII art.
 """
 
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional
 
 import pygame
 
 from games.common import GameEngine, GameEngineSkin, GameState
 from games.common.input import InputEvent
 from ams.behaviors import Entity
+
+from .level_loader import NGLevelLoader, NGLevelData
 
 
 # Screen constants
@@ -52,10 +57,11 @@ class BrickBreakerNGSkin(GameEngineSkin):
             self._render_paddle(entity, screen)
         elif entity.entity_type == 'ball':
             self._render_ball(entity, screen)
-        elif entity.entity_type == 'brick':
-            self._render_brick(entity, screen)
         elif entity.entity_type == 'projectile':
             self._render_projectile(entity, screen)
+        elif entity.entity_type.startswith('brick') or entity.entity_type.startswith('invader'):
+            # All brick variants (brick_red, brick_gray, invader, invader_shooter, etc.)
+            self._render_brick(entity, screen)
         else:
             super().render_entity(entity, screen)
 
@@ -121,6 +127,8 @@ class BrickBreakerNGMode(GameEngine):
     VERSION = "1.0.0"
     AUTHOR = "AMS Team"
 
+    # Enable YAML-based game definition and levels
+    GAME_DEF_FILE = Path(__file__).parent / 'game.yaml'
     LEVELS_DIR = Path(__file__).parent / 'levels'
 
     ARGUMENTS = [
@@ -154,9 +162,66 @@ class BrickBreakerNGMode(GameEngine):
             **kwargs,
         )
 
-    def _get_skin(self, skin_name: str) -> GameEngineSkin:
+    def _get_skin(self, _skin_name: str) -> GameEngineSkin:
         """Get rendering skin."""
         return BrickBreakerNGSkin()
+
+    def _create_level_loader(self) -> NGLevelLoader:
+        """Create BrickBreaker NG level loader."""
+        return NGLevelLoader(self.LEVELS_DIR)
+
+    def _apply_level_config(self, level_data: NGLevelData) -> None:
+        """Apply level configuration - spawn entities from level YAML.
+
+        Args:
+            level_data: Parsed level data from NGLevelLoader
+        """
+        # Clear existing entities
+        self._behavior_engine.clear()
+
+        # Set level name for HUD
+        self._level_name = level_data.name
+
+        # Apply lives from level
+        self._lives = level_data.lives
+        self._starting_lives = level_data.lives
+
+        # Spawn paddle using game.yaml entity type
+        paddle = self.spawn_entity(
+            'paddle',
+            x=level_data.paddle_x,
+            y=level_data.paddle_y,
+            **level_data.paddle_overrides,
+        )
+        if paddle:
+            self._paddle_id = paddle.id
+
+        # Spawn ball using game.yaml entity type
+        ball = self.spawn_entity(
+            'ball',
+            x=level_data.ball_x,
+            y=level_data.ball_y,
+            **level_data.ball_overrides,
+        )
+        if ball and paddle:
+            self._ball_id = ball.id
+            ball.properties['ball_attached_to'] = paddle.id
+
+        # Spawn bricks from ASCII layout
+        for brick_placement in level_data.bricks:
+            self.spawn_entity(
+                brick_placement.entity_type,
+                x=brick_placement.x,
+                y=brick_placement.y,
+            )
+
+        # Reset game state
+        self._internal_state = GameState.PLAYING
+
+    def _on_level_transition(self) -> None:
+        """Reset state when transitioning to next level in a group."""
+        # Ball will be reset by _apply_level_config
+        pass
 
     def _spawn_initial_entities(self) -> None:
         """Spawn paddle, ball, and bricks."""
@@ -320,9 +385,4 @@ class BrickBreakerNGMode(GameEngine):
                 # Reset speed
                 ball.properties['ball_speed'] = 300
 
-    def _check_win_conditions(self) -> None:
-        """Check if all bricks destroyed."""
-        bricks = [e for e in self._behavior_engine.get_alive_entities()
-                  if e.entity_type == 'brick']
-        if not bricks:
-            self._internal_state = GameState.WON
+    # Win conditions handled by GameEngine using win_target_type from game.yaml

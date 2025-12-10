@@ -43,6 +43,8 @@ class EntityTypeConfig:
     health: int = 1
     points: int = 0
     tags: List[str] = field(default_factory=list)
+    extends: Optional[str] = None  # Base type this extends
+    base_type: Optional[str] = None  # Resolved base type (for win conditions)
 
 
 @dataclass
@@ -64,6 +66,7 @@ class GameDefinition:
     # Win/lose conditions
     win_condition: str = "destroy_all"  # destroy_all, survive_time, reach_score
     win_target: int = 0  # Score target or time in seconds
+    win_target_type: Optional[str] = None  # For destroy_all: base type to destroy
     lose_on_player_death: bool = True
 
     # Level spawning (for games without explicit levels)
@@ -225,12 +228,14 @@ class GameEngine(BaseGame):
             background_color=tuple(data.get('background_color', [20, 20, 30])),
             win_condition=data.get('win_condition', 'destroy_all'),
             win_target=data.get('win_target', 0),
+            win_target_type=data.get('win_target_type'),
             lose_on_player_death=data.get('lose_on_player_death', True),
             spawn_patterns=data.get('spawn_patterns', []),
         )
 
-        # Parse entity types
-        for name, type_data in data.get('entity_types', {}).items():
+        # First pass: parse all entity types
+        raw_types = data.get('entity_types', {})
+        for name, type_data in raw_types.items():
             game_def.entity_types[name] = EntityTypeConfig(
                 name=name,
                 width=type_data.get('width', 32),
@@ -242,7 +247,11 @@ class GameEngine(BaseGame):
                 health=type_data.get('health', 1),
                 points=type_data.get('points', 0),
                 tags=type_data.get('tags', []),
+                extends=type_data.get('extends'),
             )
+
+        # Second pass: resolve inheritance
+        self._resolve_entity_inheritance(game_def)
 
         # Player config
         if 'player' in data:
@@ -251,6 +260,46 @@ class GameEngine(BaseGame):
             game_def.player_spawn = tuple(player_data.get('spawn', [400, 500]))
 
         return game_def
+
+    def _resolve_entity_inheritance(self, game_def: GameDefinition) -> None:
+        """Resolve 'extends' inheritance for entity types."""
+        for name, config in game_def.entity_types.items():
+            if config.extends:
+                # Find the base type
+                base = game_def.entity_types.get(config.extends)
+                if base:
+                    # Inherit properties that weren't overridden
+                    if config.width == 32:
+                        config.width = base.width
+                    if config.height == 32:
+                        config.height = base.height
+                    if config.color == 'white':
+                        config.color = base.color
+                    if not config.sprite:
+                        config.sprite = base.sprite
+                    if not config.behaviors:
+                        config.behaviors = base.behaviors.copy()
+                    if config.health == 1:
+                        config.health = base.health
+                    if config.points == 0:
+                        config.points = base.points
+                    if not config.tags:
+                        config.tags = base.tags.copy()
+
+                    # Merge behavior configs (child overrides parent)
+                    merged_config = dict(base.behavior_config)
+                    for behavior, bconfig in config.behavior_config.items():
+                        if behavior in merged_config:
+                            merged_config[behavior] = {**merged_config[behavior], **bconfig}
+                        else:
+                            merged_config[behavior] = bconfig
+                    config.behavior_config = merged_config
+
+                    # Set base_type (walk up the chain)
+                    config.base_type = base.base_type or config.extends
+            else:
+                # No extends - this type is its own base
+                config.base_type = name
 
     @abstractmethod
     def _get_skin(self, skin_name: str) -> GameEngineSkin:
@@ -430,22 +479,41 @@ class GameEngine(BaseGame):
                 self._score += type_config.points
 
     def _check_win_conditions(self) -> None:
-        """Check if player has won.
+        """Check if player has won based on game definition.
 
-        Override for custom win conditions.
+        Uses win_condition and win_target_type from game.yaml.
+        Override in subclass only for truly custom conditions.
         """
         if not self._game_def:
             return
 
         if self._game_def.win_condition == 'destroy_all':
-            # Win when all enemies destroyed
-            enemies = self.get_entities_by_tag('enemy')
-            if not enemies:
-                self._internal_state = GameState.WON
+            # Win when all entities of target type are destroyed
+            target_type = self._game_def.win_target_type
+            if target_type:
+                # Check for entities with matching base_type
+                targets = self.get_entities_by_base_type(target_type)
+                if not targets:
+                    self._internal_state = GameState.WON
+            else:
+                # Fallback: check for 'enemy' tagged entities
+                enemies = self.get_entities_by_tag('enemy')
+                if not enemies:
+                    self._internal_state = GameState.WON
 
         elif self._game_def.win_condition == 'reach_score':
             if self._score >= self._game_def.win_target:
                 self._internal_state = GameState.WON
+
+    def get_entities_by_base_type(self, base_type: str) -> List[Entity]:
+        """Get all alive entities that extend from a base type."""
+        result = []
+        for entity in self._behavior_engine.get_alive_entities():
+            if self._game_def:
+                type_config = self._game_def.entity_types.get(entity.entity_type)
+                if type_config and type_config.base_type == base_type:
+                    result.append(entity)
+        return result
 
     def _check_lose_conditions(self) -> None:
         """Check if player has lost."""

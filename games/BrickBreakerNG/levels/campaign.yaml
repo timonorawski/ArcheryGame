@@ -1,0 +1,10 @@
+# BrickBreaker NG Campaign
+# Progress through all levels
+
+name: "Main Campaign"
+type: group
+
+levels:
+  - tutorial_01
+  - tutorial_02
+  - space_invaders

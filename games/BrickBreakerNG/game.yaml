@@ -1,0 +1,229 @@
+# BrickBreaker NextGen - Game Definition
+#
+# This YAML defines all entity types, their behaviors, and game rules.
+# Levels reference these entity types by name.
+#
+# Entity types can extend other types using the 'extends' field.
+# The base_type is preserved for win condition checking.
+
+name: "Brick Breaker NG"
+screen_width: 800
+screen_height: 600
+background_color: [20, 20, 30]
+
+# Win/lose conditions
+win_condition: destroy_all
+win_target_type: brick  # Win when all entities with base_type 'brick' destroyed
+lose_on_player_death: true
+
+# =============================================================================
+# Entity Type Definitions
+# =============================================================================
+# Each type defines default properties and attached behaviors.
+# Levels can override any property when spawning.
+# Types can use 'extends' to inherit from a base type.
+
+entity_types:
+
+  # ---------------------------------------------------------------------------
+  # Player entities
+  # ---------------------------------------------------------------------------
+
+  paddle:
+    width: 120
+    height: 15
+    color: blue
+    behaviors: [paddle]
+    behavior_config:
+      paddle:
+        speed: 500
+        stop_threshold: 1.0
+    tags: [player]
+
+  ball:
+    width: 16
+    height: 16
+    color: white
+    behaviors: [ball]
+    behavior_config:
+      ball:
+        speed: 300
+        max_speed: 600
+        speed_increase: 5
+    tags: [ball]
+
+  # ---------------------------------------------------------------------------
+  # Base brick type (extended by specific colors)
+  # ---------------------------------------------------------------------------
+
+  brick:
+    width: 70
+    height: 25
+    color: gray
+    behaviors: [brick]
+    behavior_config:
+      brick:
+        hits: 1
+        points: 100
+    tags: [enemy, brick]
+
+  # ---------------------------------------------------------------------------
+  # Basic bricks (single hit, different colors/points)
+  # Extend from 'brick' base type
+  # ---------------------------------------------------------------------------
+
+  brick_red:
+    extends: brick
+    color: red
+    behavior_config:
+      brick:
+        points: 500
+
+  brick_orange:
+    extends: brick
+    color: orange
+    behavior_config:
+      brick:
+        points: 400
+
+  brick_yellow:
+    extends: brick
+    color: yellow
+    behavior_config:
+      brick:
+        points: 300
+
+  brick_green:
+    extends: brick
+    color: green
+    behavior_config:
+      brick:
+        points: 200
+
+  brick_blue:
+    extends: brick
+    color: blue
+    behavior_config:
+      brick:
+        points: 100
+
+  # ---------------------------------------------------------------------------
+  # Multi-hit bricks
+  # ---------------------------------------------------------------------------
+
+  brick_gray:
+    extends: brick
+    color: gray
+    behavior_config:
+      brick:
+        hits: 2
+        points: 200
+
+  brick_silver:
+    extends: brick
+    color: silver
+    behavior_config:
+      brick:
+        hits: 3
+        points: 400
+
+  # ---------------------------------------------------------------------------
+  # Space Invaders style bricks (extend brick, add movement behaviors)
+  # ---------------------------------------------------------------------------
+
+  invader:
+    extends: brick
+    color: green
+    behaviors: [brick, descend]
+    behavior_config:
+      brick:
+        points: 150
+      descend:
+        speed: 15
+        pattern: fixed
+
+  invader_oscillating:
+    extends: brick
+    color: cyan
+    behaviors: [brick, descend, oscillate]
+    behavior_config:
+      brick:
+        points: 200
+      descend:
+        speed: 15
+        pattern: fixed
+      oscillate:
+        speed: 40
+        range: 30
+
+  invader_shooter:
+    extends: brick
+    color: purple
+    behaviors: [brick, descend, shoot]
+    behavior_config:
+      brick:
+        hits: 2
+        points: 500
+      descend:
+        speed: 10
+        pattern: fixed
+      shoot:
+        interval: 3.0
+        projectile_speed: 200
+        direction: down
+    tags: [enemy, brick, shooter]  # Additional tag
+
+  # ---------------------------------------------------------------------------
+  # Indestructible/special bricks
+  # ---------------------------------------------------------------------------
+
+  brick_indestructible:
+    width: 70
+    height: 25
+    color: white
+    behaviors: [brick]
+    behavior_config:
+      brick:
+        hits: 1
+        indestructible: true
+        points: 0
+    tags: [brick]  # Not tagged as enemy - won't count for win
+
+  # ---------------------------------------------------------------------------
+  # Projectiles
+  # ---------------------------------------------------------------------------
+
+  projectile:
+    width: 8
+    height: 8
+    color: red
+    behaviors: [projectile]
+    tags: [projectile, hazard]
+
+# =============================================================================
+# Player Configuration
+# =============================================================================
+
+player:
+  type: paddle
+  spawn: [340, 550]  # x, y position
+
+# =============================================================================
+# Default Layout (used when no level specified)
+# =============================================================================
+# This creates the classic 5-row brick layout
+
+default_layout:
+  ball_spawn: [392, 525]
+  brick_grid:
+    start_x: 65
+    start_y: 60
+    cols: 10
+    rows: 5
+    # Row patterns: which entity type for each row (bottom to top visually)
+    row_types:
+      - brick_blue
+      - brick_green
+      - brick_yellow
+      - brick_orange
+      - brick_red
