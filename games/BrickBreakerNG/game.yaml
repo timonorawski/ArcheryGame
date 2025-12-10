@@ -38,17 +38,10 @@ entity_types:
   # ---------------------------------------------------------------------------
 
   # paddle_ready: Composite entity that looks like paddle+ball, transforms on input
-  # This is the "waiting to launch" state
+  # This is the "waiting to launch" state. Extends paddle so collisions work.
   paddle_ready:
-    width: 120
-    height: 15
-    color: blue
-    behaviors: [paddle]
-    behavior_config:
-      paddle:
-        speed: 500
-        stop_threshold: 1.0
-    tags: [player]
+    extends: paddle
+    tags: [player]  # Override tags to keep player tag
     render:
       # Paddle body
       - shape: rectangle
@@ -341,6 +334,13 @@ collision_behaviors:
       modifier:
         amount: 1
 
+  # Projectile hitting paddle - damages player
+  projectile:
+    paddle:
+      action: hit_player
+      modifier:
+        play_sound: player_hit
+
 # =============================================================================
 # Collision Rules (for collision detection)
 # =============================================================================
@@ -350,6 +350,7 @@ collision_behaviors:
 collisions:
   - [ball, paddle]
   - [ball, brick]
+  - [projectile, paddle]
 
 # =============================================================================
 # Input Mapping
@@ -388,6 +389,18 @@ lose_conditions:
     edge: bottom
     action: lose_life
     then:
+      destroy: ball
+      transform:
+        entity_type: paddle
+        into: paddle_ready
+
+  # Projectile hitting paddle causes life loss
+  - entity_type: paddle
+    event: property_true
+    property: was_hit
+    action: lose_life
+    then:
+      clear_property: was_hit
       destroy: ball
       transform:
         entity_type: paddle

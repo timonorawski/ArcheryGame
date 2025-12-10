@@ -153,11 +153,13 @@ class CollisionRule:
 class LoseConditionConfig:
     """Configuration for a lose condition."""
     entity_type: str  # Type to watch
-    event: str  # Event type: "exited_screen", "health_zero", etc.
+    event: str  # Event type: "exited_screen", "property_true", etc.
     edge: Optional[str] = None  # For exited_screen: "top", "bottom", "left", "right", "any"
+    property_name: Optional[str] = None  # For property_true: property to check
     action: str = "lose_life"  # Action to take
     then_destroy: Optional[str] = None  # Entity type to destroy
     then_transform: Optional[Dict[str, str]] = None  # {entity_type: X, into: Y}
+    then_clear_property: Optional[str] = None  # Property to clear after action
 
 
 @dataclass
@@ -753,9 +755,11 @@ class GameEngine(BaseGame):
                 entity_type=condition_data.get('entity_type', ''),
                 event=condition_data.get('event', ''),
                 edge=condition_data.get('edge'),
+                property_name=condition_data.get('property'),
                 action=condition_data.get('action', 'lose_life'),
                 then_destroy=condition_data.get('then', {}).get('destroy'),
                 then_transform=then_transform,
+                then_clear_property=condition_data.get('then', {}).get('clear_property'),
             ))
 
         # Player config
@@ -1316,6 +1320,8 @@ class GameEngine(BaseGame):
         for condition in self._game_def.lose_conditions:
             if condition.event == 'exited_screen':
                 self._check_exited_screen_condition(condition)
+            elif condition.event == 'property_true':
+                self._check_property_true_condition(condition)
 
     def _check_exited_screen_condition(self, condition: LoseConditionConfig) -> None:
         """Check if any entity of type has exited the screen."""
@@ -1343,6 +1349,21 @@ class GameEngine(BaseGame):
                     exited = True
 
             if exited:
+                self._handle_lose_condition_triggered(entity, condition)
+
+    def _check_property_true_condition(self, condition: LoseConditionConfig) -> None:
+        """Check if any entity of type has a property set to true."""
+        if not condition.property_name:
+            return
+
+        entities = self._get_entities_matching_type(
+            condition.entity_type,
+            self._behavior_engine.get_alive_entities()
+        )
+
+        for entity in entities:
+            prop_value = entity.properties.get(condition.property_name)
+            if prop_value:  # Truthy check
                 self._handle_lose_condition_triggered(entity, condition)
 
     def _handle_lose_condition_triggered(self, entity: Entity,
@@ -1378,6 +1399,10 @@ class GameEngine(BaseGame):
                 if targets:
                     # Transform first matching entity
                     self.transform_entity(targets[0], into_type)
+
+        if condition.then_clear_property:
+            # Clear the property that triggered the condition
+            entity.properties[condition.then_clear_property] = False
 
     def transform_entity(self, entity: Entity, into_type: str,
                          spawn_configs: Optional[List[SpawnConfig]] = None) -> Optional[Entity]:
