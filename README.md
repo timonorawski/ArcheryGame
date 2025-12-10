@@ -1,28 +1,64 @@
-# AMS - Arcade Management System
+# ArcheryGame – Arcade joy for everyone, everywhere
 
-An interactive projection targeting platform that uses computer vision to create engaging games for projectile-based activities.
+A complete, free, and open platform that brings real arcade magic back and makes it even better – without the downsides of modern gaming.
 
-## What It Does
+You can play these games with:
+- a mouse (for testing)
+- a laser pointer
+- real arrows, darts, nerf balls, bean bags, or anything you can throw at a wall
+- your finger on a phone or tablet
 
-A projector displays targets on any flat surface. A camera detects when something hits the target area. The system provides real-time visual and audio feedback. Works with laser pointers, nerf darts, foam arrows, balls, or any projectile.
+The same game runs identically on a 30-foot projected wall, in a browser, or on a laptop in a classroom.  
+One file. Zero installs for players. Zero dark patterns. Zero pay-to-win.
 
-## Quick Start
+## The missio
+Modern kids’ games train thumbs and dopamine loops.
+I wanted my kids to grow up with games that train:
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+- hand-eye coordination that translates to real life
+- spatial reasoning and timing you can feel in your muscles
+- proprioception and bilateral coordination
+- the pure neuroplastic rocket fuel that only comes from physical cause → visible effect in the same half-second
 
-# Play Duck Hunt with mouse (for testing)
-python ams_game.py --game duckhunt --backend mouse
+So I built a system where the duck dies because the arrow you shot actually hit it in the real world, at the exact moment your brain predicted it would.
+That’s not nostalgia.
+That’s brain-building in its most fun possible form.
+Every game on this platform is engineered from the ground up to be creatable by children (drag-and-drop → YAML → optional tiny safe Lua), instantly playable in a browser, and magically accurate when you play it with real projectiles on a real wall or archery target.
+From bedroom screen to 30-foot projected wall with real arrows – no changes.
 
-# Play with laser pointer (requires calibration)
-python ams_game.py --game duckhunt --backend laser --fullscreen --display 1
+I also wanted them to be able to make games themselves.  
+So everything is designed from the ground up to be creatable and understandable by those who have never written code.
 
-# Play with nerf dart detection
-python ams_game.py --game duckhunt --backend object --fullscreen --display 1
-```
+The result is a platform where:
+- Making a complete, polished arcade game is as easy as editing a short text file (YAML)
+- Learning a little coding (Lua) is optional, never required, and always safe
+- Every game you make instantly works in the browser and on real physical installations
+- Sharing is just sending a link
+- Schools, makerspaces, museums, and families get it forever for free
+- Commercial arcades and venues pay a fair price so the project stays alive and keeps getting better for everyone
 
-## Features
+## What’s inside right now
+
+- A rock-solid data-driven 2D arcade engine (pure YAML + optional tiny Lua scripts)
+- Full browser deployment via pygame-wasm / pygbag (playable right now)
+- AMS – the physical-input layer that turns projectors + cameras into interactive walls
+- DuckHunt, Brick Breaker NG, Balloon Pop, and more – all running with real arrows or in your browser
+- Temporal hit compensation (computer vision pipeline has latency? the duck still gets hit at the right moment)
+
+## Try it right now
+
+(Links coming the second the first live web demo is up – literally days away)
+
+In the meantime:  
+`git clone https://github.com/timonorawski/ArcheryGame`  
+`python ams_game.py --game brickbreaker --backend mouse`  
+or just wait for the browser version and play with your finger.
+
+Made with love by one dad who got fed up, for his kids and for yours.
+
+Welcome to the arcade renaissance.
+
+## Features for techies
 
 - **3 Detection Backends**: Mouse (testing), laser pointer, object detection
 - **Geometric Calibration**: ArUco marker-based camera-projector alignment
