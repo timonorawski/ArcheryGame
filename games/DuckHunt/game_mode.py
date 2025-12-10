@@ -114,7 +114,8 @@ class DuckHuntMode(BaseGame):
         self._target_score = target_score
 
         # Import game components (delayed import to avoid circular deps)
-        from games.DuckHunt.game.target import Target
+        from games.DuckHunt.game.duck_target import DuckTarget, DuckPhase
+        from games.DuckHunt.game.sprites import get_duck_sprites
         from games.DuckHunt.game.scoring import ScoreTracker
         from games.DuckHunt.game.feedback import FeedbackManager
         from games.DuckHunt.config import (
@@ -128,8 +129,13 @@ class DuckHuntMode(BaseGame):
         )
         from models import Vector2D, TargetData, TargetState
 
+        # Initialize sprite system
+        self._duck_sprites = get_duck_sprites()
+
         # Store imports for use in methods
-        self._Target = Target
+        self._DuckTarget = DuckTarget
+        self._DuckPhase = DuckPhase
+        self._Target = DuckTarget  # Alias for compatibility
         self._TargetData = TargetData
         self._TargetState = TargetState
         self._Vector2D = Vector2D
@@ -145,8 +151,9 @@ class DuckHuntMode(BaseGame):
         self._game_over = False
         self._won = False
 
-        # Hit target display timers
-        self._hit_target_timers = {}
+        # Shot sound (loaded lazily)
+        self._shot_sound: Optional[pygame.mixer.Sound] = None
+        self._shot_sound_loaded = False
 
         # Level configuration (loaded from YAML or defaults)
         self._level_config = None
@@ -290,20 +297,17 @@ class DuckHuntMode(BaseGame):
             # Check all targets for hit
             for i, target in enumerate(self._targets):
                 if target.is_active and target.contains_point(event.position):
-                    # Target was hit - stop it at current position
-                    hit_data = self._TargetData(
-                        position=target.data.position,
-                        velocity=self._Vector2D(x=0.0, y=0.0),
-                        size=target.data.size,
-                        state=self._TargetState.HIT
-                    )
-                    self._targets[i] = self._Target(hit_data)
+                    # Target was hit - use DuckTarget.hit() for sprite-based hit handling
+                    self._targets[i] = target.hit()
 
                     # Update score
                     self._score_tracker = self._score_tracker.record_hit()
 
                     # Add visual and audio feedback
                     self._feedback.add_hit_effect(event.position, points=100)
+
+                    # Play shot sound if available
+                    self._play_shot_sound()
 
                     # Check for combo milestone
                     new_combo = self._score_tracker.get_stats().current_combo
@@ -331,36 +335,26 @@ class DuckHuntMode(BaseGame):
         if self.state != GameState.PLAYING:
             return
 
-        # Update all targets
+        # Update all targets using DuckTarget's phase-based logic
         updated_targets = []
-        hit_timers_to_keep = {}
 
         for target in self._targets:
-            target_id = id(target)
+            # DuckTarget.update() handles:
+            # - FLYING: normal movement
+            # - HIT_PAUSE: stay in place showing hit sprite
+            # - FALLING: gravity-based fall
+            updated_target = target.update(dt)
 
-            if target.data.state == self._TargetState.HIT:
-                # Update hit timer
-                if target_id not in self._hit_target_timers:
-                    self._hit_target_timers[target_id] = 0.0
-                self._hit_target_timers[target_id] += dt
-
-                # Keep hit target for 0.5 seconds then remove
-                if self._hit_target_timers[target_id] < 0.5:
-                    updated_targets.append(target)
-                    hit_timers_to_keep[target_id] = self._hit_target_timers[target_id]
-
-            elif target.is_active:
-                # Update position for active targets
-                updated_target = target.update(dt)
-
-                # Check if target escaped off screen
-                if updated_target.is_off_screen(self._SCREEN_WIDTH, self._SCREEN_HEIGHT):
+            # Check if target went off screen
+            if updated_target.is_off_screen(self._SCREEN_WIDTH, self._SCREEN_HEIGHT):
+                # Only count as miss if it was an alive target that escaped
+                if target.phase == self._DuckPhase.FLYING:
                     self._score_tracker = self._score_tracker.record_miss()
-                else:
-                    updated_targets.append(updated_target)
+                # Don't add to updated list - target is gone
+            else:
+                updated_targets.append(updated_target)
 
         self._targets = updated_targets
-        self._hit_target_timers = hit_timers_to_keep
 
         # Spawn new targets
         self._spawn_timer -= dt
@@ -382,13 +376,9 @@ class DuckHuntMode(BaseGame):
         bg_color = self._palette.get_background_color()
         screen.fill(bg_color)
 
-        # Render all targets
-        target_color = self._palette.random_target_color()
+        # Render all targets (DuckTarget handles sprite rendering based on phase)
         for target in self._targets:
-            if target.data.state == self._TargetState.ALIVE:
-                target.render(screen, color=target_color)
-            else:
-                target.render(screen)
+            target.render(screen)
 
         # Render feedback effects
         self._feedback.render(screen)
@@ -453,7 +443,28 @@ class DuckHuntMode(BaseGame):
             state=self._TargetState.ALIVE,
         )
 
-        self._targets.append(self._Target(target_data))
+        # Create DuckTarget with sprite support
+        self._targets.append(self._DuckTarget(target_data, sprites=self._duck_sprites))
+
+    def _play_shot_sound(self) -> None:
+        """Play shot sound effect if available."""
+        import os
+
+        # Load sound lazily on first use
+        if not self._shot_sound_loaded:
+            self._shot_sound_loaded = True
+            sound_path = os.path.join(
+                os.path.dirname(__file__), "assets", "shot.wav"
+            )
+            if os.path.exists(sound_path):
+                try:
+                    self._shot_sound = pygame.mixer.Sound(sound_path)
+                except Exception as e:
+                    print(f"Warning: Could not load shot.wav: {e}")
+
+        # Play sound if loaded
+        if self._shot_sound:
+            self._shot_sound.play()
 
     def _increase_difficulty(self) -> None:
         """Increase game difficulty by speeding up targets."""
