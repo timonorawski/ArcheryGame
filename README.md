@@ -68,3 +68,5 @@ don't be a jerk—just reach out and we'll figure out a fair contribution
 or a simple commercial license. No gotchas, no NDAs, no 50-page contracts.
 
 In short: be cool, share alike, and if you're getting paid, help keep it alive.
+
+https://creativecommons.org/licenses/by-nc-sa/4.0/
