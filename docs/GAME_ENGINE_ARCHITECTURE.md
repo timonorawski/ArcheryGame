@@ -30,6 +30,39 @@ The AMS Game Engine enables fully data-driven arcade games. Games are defined by
 3. **Explicit over implicit.** Lua expressions use `{lua: "..."}` syntax.
 4. **Engine is behavior-agnostic.** The engine doesn't know what "ball" or "paddle" means.
 
+### The Minimal Game Mode
+
+A fully data-driven game mode is just a YAML loader shim:
+
+```python
+class BrickBreakerNGSkin(GameEngineSkin):
+    """All rendering is YAML-driven via game.yaml render commands."""
+    pass  # All rendering handled by base class
+
+
+class BrickBreakerNGMode(GameEngine):
+    NAME = _GAME_META['name']           # From game.yaml
+    DESCRIPTION = _GAME_META['description']
+    VERSION = _GAME_META['version']
+    AUTHOR = _GAME_META['author']
+
+    GAME_DEF_FILE = Path(__file__).parent / 'game.yaml'
+    LEVELS_DIR = Path(__file__).parent / 'levels'
+
+    def _get_skin(self, _skin_name: str) -> GameEngineSkin:
+        return BrickBreakerNGSkin()
+
+    def _create_level_loader(self) -> NGLevelLoader:
+        return NGLevelLoader(self.LEVELS_DIR)
+
+    # ALL game logic is declarative in game.yaml:
+    # - player spawn: player.type + player.spawn
+    # - input mapping: input_mapping section
+    # - collision behaviors: collision_behaviors section
+    # - lose conditions: lose_conditions section
+    # - win conditions: win_target_type
+```
+
 ## YAML Game Definition
 
 A game is defined by a `game.yaml` file with these sections:
@@ -37,24 +70,33 @@ A game is defined by a `game.yaml` file with these sections:
 ### Basic Structure
 
 ```yaml
-name: "My Game"
+name: "Brick Breaker NG"
+description: "Lua behavior-driven brick breaker"
+version: "1.0.0"
+author: "AMS Team"
+
 screen_width: 800
 screen_height: 600
-background_color: black
+background_color: [20, 20, 30]
+
+# Default settings (accessible via CLI)
+defaults:
+  lives: 3
 
 # Win condition
 win_condition: destroy_all
 win_target_type: brick  # Entity base type to destroy
+lose_on_player_death: true
 
 # Entity type definitions
 entity_types:
   # ...
 
-# Collision rules
+# Collision rules (detection)
 collisions:
   # ...
 
-# Collision behavior handlers
+# Collision behavior handlers (what happens)
 collision_behaviors:
   # ...
 
@@ -87,17 +129,62 @@ Entity types define the building blocks of your game.
 
 ```yaml
 entity_types:
-  # Basic entity
+  # Base paddle type
   paddle:
     width: 120
-    height: 20
+    height: 15
     color: blue
     behaviors: [paddle]
     behavior_config:
       paddle:
-        speed: 400
+        speed: 500
+        stop_threshold: 1.0
+    tags: [player]
+    render:
+      - shape: rectangle
+        color: blue
+        fill: true
+      - shape: rectangle
+        color: white
+        fill: false
+        line_width: 2
 
-  # Entity with inheritance
+  # Paddle with ball attached (extends paddle)
+  paddle_ready:
+    extends: paddle
+    tags: [player]
+    render:
+      - shape: rectangle
+        color: blue
+        fill: true
+      - shape: rectangle
+        color: white
+        fill: false
+        line_width: 2
+      - shape: circle
+        color: white
+        fill: true
+        offset: [52, -20]
+        size: [16, 16]
+
+  # Ball entity
+  ball:
+    width: 16
+    height: 16
+    color: white
+    behaviors: [ball]
+    behavior_config:
+      ball:
+        speed: 300
+        max_speed: 600
+        speed_increase: 5
+    tags: [ball]
+    render:
+      - shape: circle
+        color: white
+        fill: true
+
+  # Base brick type
   brick:
     width: 70
     height: 25
@@ -108,8 +195,35 @@ entity_types:
         hits: 1
         points: 100
     tags: [enemy, brick]
+    render:
+      - shape: rectangle
+        color: $color
+        fill: true
+      - shape: rectangle
+        color: white
+        fill: false
+        line_width: 1
+      # Damage overlay for multi-hit bricks
+      - shape: rectangle
+        color: black
+        fill: true
+        alpha: $damage_ratio
+        when:
+          property: brick_max_hits
+          compare: greater_than
+          value: 1
+      # Hit count text
+      - shape: text
+        text: $brick_hits_remaining
+        color: white
+        font_size: 20
+        align: center
+        when:
+          property: brick_max_hits
+          compare: greater_than
+          value: 1
 
-  # Variant inherits from base
+  # Colored brick variants
   brick_red:
     extends: brick
     color: red
@@ -117,7 +231,16 @@ entity_types:
       brick:
         points: 500
 
-  # Complex entity with multiple behaviors
+  # Multi-hit brick
+  brick_silver:
+    extends: brick
+    color: silver
+    behavior_config:
+      brick:
+        hits: 3
+        points: 400
+
+  # Space Invaders style brick with multiple behaviors
   invader_shooter:
     extends: brick
     color: purple
@@ -131,7 +254,59 @@ entity_types:
         pattern: fixed
       shoot:
         interval: 3.0
-        projectile_type: projectile
+        projectile_speed: 200
+        direction: down
+    tags: [enemy, brick, shooter]
+    render:
+      - shape: rectangle
+        color: $color
+        fill: true
+      - shape: rectangle
+        color: white
+        fill: false
+        line_width: 1
+      # Triangle indicator pointing down
+      - shape: triangle
+        color: yellow
+        fill: true
+        points: [[0.3, 0.8], [0.7, 0.8], [0.5, 1.3]]
+
+  # Projectile
+  projectile:
+    width: 8
+    height: 8
+    color: red
+    behaviors: [projectile]
+    tags: [projectile, hazard]
+    render:
+      - shape: circle
+        color: red
+        fill: true
+
+  # Indestructible brick
+  brick_indestructible:
+    width: 70
+    height: 25
+    color: white
+    behaviors: [brick]
+    behavior_config:
+      brick:
+        hits: 1
+        indestructible: true
+        points: 0
+    tags: [brick]  # No 'enemy' tag - won't count for win
+    render:
+      - shape: rectangle
+        color: $color
+        fill: true
+      - shape: line
+        color: gray
+        line_width: 2
+        points: [[0.1, 0.1], [0.9, 0.9]]
+      - shape: line
+        color: gray
+        line_width: 2
+        points: [[0.9, 0.1], [0.1, 0.9]]
 ```
 
 #### Entity Type Fields
@@ -151,92 +326,23 @@ entity_types:
 
 #### Inheritance
 
-Types with `extends` inherit all fields from the parent. Child values override parent values. `behavior_config` and `render` are inherited if not specified by child.
+Types with `extends` inherit all fields from the parent. Child values override parent values. `behavior_config` is merged (child overrides parent keys). `render` is inherited only if child doesn't define its own.
 
-The engine tracks `base_type` for win conditions—`brick_red` has `base_type: brick`.
+The engine tracks `base_type` for collision matching and win conditions—`brick_red` has `base_type: brick`.
 
 ### Rendering
 
 Entities are rendered using declarative render commands. Each entity type can define a list of render primitives.
 
-```yaml
-entity_types:
-  paddle:
-    width: 120
-    height: 15
-    render:
-      # Blue filled rectangle
-      - shape: rectangle
-        color: blue
-        fill: true
-      # White outline
-      - shape: rectangle
-        color: white
-        fill: false
-        line_width: 2
-
-  ball:
-    width: 16
-    height: 16
-    render:
-      - shape: circle
-        color: white
-        fill: true
-
-  brick:
-    width: 70
-    height: 25
-    render:
-      - shape: rectangle
-        color: $color  # Reference entity.color
-        fill: true
-      - shape: rectangle
-        color: white
-        fill: false
-        line_width: 1
-
-  invader_shooter:
-    extends: brick
-    render:
-      # Inherit brick render, add indicator
-      - shape: rectangle
-        color: $color
-        fill: true
-      - shape: rectangle
-        color: white
-        fill: false
-        line_width: 1
-      # Triangle indicator for "shoots"
-      - shape: triangle
-        color: yellow
-        fill: true
-        points: [[0.5, 0.3], [0.3, 0.7], [0.7, 0.7]]
-
-  brick_indestructible:
-    render:
-      - shape: rectangle
-        color: $color
-        fill: true
-      # X pattern
-      - shape: line
-        color: gray
-        line_width: 2
-        points: [[0.1, 0.1], [0.9, 0.9]]
-      - shape: line
-        color: gray
-        line_width: 2
-        points: [[0.9, 0.1], [0.1, 0.9]]
-```
-
 #### Render Command Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `shape` | string | Primitive type: `rectangle`, `circle`, `triangle`, `polygon`, `line`, `sprite`, `text` |
+| `shape` | string | Primitive: `rectangle`, `circle`, `triangle`, `polygon`, `line`, `sprite`, `text` |
 | `color` | string | Color name or `$color` to use entity.color |
 | `fill` | bool | Fill shape (true) or outline only (false) |
 | `line_width` | int | Outline/stroke width in pixels |
-| `alpha` | any | Opacity: 0-1, `$property`, or `{lua: expr}` |
+| `alpha` | any | Opacity: 0-1 float, `$property`, or `{lua: expr}` |
 | `points` | list | Normalized (0-1) coordinates for polygon/triangle/line |
 | `offset` | [x, y] | Offset from entity position |
 | `size` | [w, h] | Override entity dimensions |
@@ -269,11 +375,11 @@ render:
 | `value` | Value to compare against |
 | `compare` | Comparison: `equals` (default), `not_equals`, `greater_than`, `less_than` |
 
-#### Color References
+#### Color and Property References
 
 - `$color` - Use the entity's `color` field
 - `$property_name` - Use value from entity.properties
-- Any color name - Direct color (red, blue, white, etc.)
+- Any color name - Direct color (red, blue, white, gray, silver, cyan, purple, orange, yellow, green)
 
 #### Computed Properties
 
@@ -285,19 +391,6 @@ Built-in computed properties available via `$name`:
 | `$health_ratio` | `health / max_health` (0-1, 1 when full health) |
 | `$alive` | Boolean, whether entity is alive |
 
-Example using computed property for damage overlay:
-```yaml
-render:
-  - shape: rectangle
-    color: black
-    fill: true
-    alpha: $damage_ratio  # Darkens as brick takes damage
-    when:
-      property: brick_max_hits
-      compare: greater_than
-      value: 1
-```
-
 #### Coordinate System
 
 Points for `polygon`, `triangle`, and `line` use normalized coordinates (0-1):
@@ -305,34 +398,24 @@ Points for `polygon`, `triangle`, and `line` use normalized coordinates (0-1):
 - `[1, 1]` = bottom-right of entity bounds
 - `[0.5, 0.5]` = center of entity
 
+Points can extend beyond 0-1 for indicators that extend outside the entity bounds.
+
 #### Layering
 
 Render commands are drawn in order. Later commands appear on top.
 
-```yaml
-render:
-  - shape: rectangle  # Background
-    color: blue
-    fill: true
-  - shape: circle     # Drawn on top
-    color: white
-    fill: true
-    offset: [10, 10]
-    size: [8, 8]
-```
-
 ### Collisions
 
-Collisions are declared in two parts: which types collide, and what happens.
+Collisions are declared in two parts: which types collide (detection), and what happens (behavior).
 
 ```yaml
-# Which entity types can collide
+# Which entity types can collide (detection only)
 collisions:
   - [ball, paddle]
-  - [ball, brick]    # Also matches brick_red, invader, etc. (inheritance)
+  - [ball, brick]       # Also matches brick_red, invader, etc. via base_type
   - [projectile, paddle]
 
-# What happens on collision
+# What happens on collision (actions)
 collision_behaviors:
   ball:
     paddle:
@@ -343,16 +426,26 @@ collision_behaviors:
       action: bounce_reflect
       modifier:
         speed_increase: 5
-        max_speed: 500
+        max_speed: 600
+
   brick:
     ball:
       action: take_damage
       modifier:
         amount: 1
-        points: 100
+
+  projectile:
+    paddle:
+      action: hit_player
+      modifier:
+        play_sound: player_hit
 ```
 
-Collision behaviors are Lua scripts in `ams/behaviors/collision_actions/`. The `modifier` dict is passed to the action's `execute(a_id, b_id, modifier)` function.
+The `collisions` list defines which type pairs the engine checks for overlap. The `collision_behaviors` section defines what action to execute when collision is detected.
+
+Both sides of a collision can have separate actions. When ball hits brick: `ball->brick` triggers `bounce_reflect`, and `brick->ball` triggers `take_damage`.
+
+Collision behaviors use `base_type` matching—a rule for `brick` matches `brick_red`, `invader_shooter`, etc.
 
 ### Input Mapping
 
@@ -362,7 +455,7 @@ Input mapping connects player input to entity behavior.
 input_mapping:
   # Simple: set property from input position
   paddle:
-    target_x: paddle_target_x  # Property name to set
+    target_x: paddle_target_x
 
   # Complex: transform entity on input
   paddle_ready:
@@ -376,16 +469,6 @@ input_mapping:
             speed: 300
             angle:
               lua: ams.random_range(-120, -60)
-
-  # Conditional action
-  ball:
-    on_input:
-      action: ball.launch
-      when:
-        property: ball_launched
-        value: false
-      modifier:
-        angle: -90
 ```
 
 #### Input Mapping Fields
@@ -395,21 +478,13 @@ input_mapping:
 | `target_x` | string | Property to set from `input.position.x` |
 | `target_y` | string | Property to set from `input.position.y` |
 | `on_input.transform` | object | Transform entity on input |
-| `on_input.action` | string | Lua function to call |
 | `on_input.when` | object | Condition for action |
-| `on_input.modifier` | object | Config passed to action |
 
 ### Transform System
 
 Transform is the core primitive for entity metamorphosis—an entity becomes something fundamentally different.
 
 ```yaml
-# Composite entity (renders as multiple things)
-paddle_ready:
-  behaviors: [paddle]
-  render_as: [paddle, ball]  # Skin renders both
-
-# Transform on input
 input_mapping:
   paddle_ready:
     on_input:
@@ -418,15 +493,16 @@ input_mapping:
         spawn:                 # Spawn children at same position
           - type: ball
             offset: [52, -20]  # Relative to parent
-            speed: 300         # Spawn properties (behavior interprets)
+            speed: 300         # Spawn properties (behavior reads on_spawn)
             angle:
               lua: ams.random_range(-120, -60)
 ```
 
 Transform:
 1. Changes the entity's type (updates behaviors, config, rendering)
-2. Optionally spawns child entities with offset and properties
-3. Child properties support `{lua: "..."}` for dynamic values
+2. Preserves entity ID and position
+3. Optionally spawns child entities with offset and properties
+4. Child properties support `{lua: "..."}` for dynamic values evaluated at spawn time
 
 ### Lose Conditions
 
@@ -434,40 +510,71 @@ Lose conditions define what causes life loss and how to recover.
 
 ```yaml
 lose_conditions:
+  # Ball exits screen
   - entity_type: ball
     event: exited_screen
-    edge: bottom              # bottom, top, left, right, any
+    edge: bottom
     action: lose_life
     then:
-      destroy: ball           # Remove the ball
+      destroy: ball
       transform:
-        entity_type: paddle   # Transform this entity
-        into: paddle_ready    # Back to waiting state
+        entity_type: paddle
+        into: paddle_ready
+
+  # Projectile hits paddle (via property set by collision action)
+  - entity_type: paddle
+    event: property_true
+    property: was_hit
+    action: lose_life
+    then:
+      clear_property: was_hit
+      destroy: ball
+      transform:
+        entity_type: paddle
+        into: paddle_ready
 ```
 
-The engine detects screen exit events and triggers the configured response.
+#### Lose Condition Fields
 
-### Spawn Properties and Lua Evaluation
+| Field | Type | Description |
+|-------|------|-------------|
+| `entity_type` | string | Entity type to watch |
+| `event` | string | `exited_screen` or `property_true` |
+| `edge` | string | For exited_screen: `bottom`, `top`, `left`, `right`, `any` |
+| `property` | string | For property_true: property name to check |
+| `action` | string | `lose_life` |
+| `then.destroy` | string | Entity type to destroy |
+| `then.transform` | object | Transform another entity type |
+| `then.clear_property` | string | Property to set to false after action |
 
-Any property in a spawn config can use `{lua: "..."}` for dynamic evaluation:
+### Win Conditions
+
+Win conditions are defined at the top level:
 
 ```yaml
-spawn:
-  - type: ball
-    offset: [0, -20]
-    speed: 300
-    angle:
-      lua: ams.random_range(-120, -60)
-    some_flag: true           # Literal value
-    custom_value:
-      lua: ams.random() * 100  # Any Lua expression
+win_condition: destroy_all    # or: reach_score, survive_time
+win_target_type: brick        # For destroy_all: base type to destroy
+win_target: 10000             # For reach_score: target score
+lose_on_player_death: true    # Game over when lives reach 0
 ```
 
-The engine evaluates `{lua: "..."}` at spawn time, passing the result to the entity's properties. The behavior's `on_spawn` can then use these values.
+For `destroy_all`, the engine counts entities whose `base_type` matches `win_target_type`. Entities without the `enemy` tag (like `brick_indestructible`) don't count.
 
 ## Lua Behaviors
 
 Behaviors are Lua scripts that define entity logic. They live in `ams/behaviors/lua/`.
+
+### Available Behaviors
+
+| Behavior | Description |
+|----------|-------------|
+| `paddle` | Stopping paddle that slides to target_x position |
+| `ball` | Movement, wall bouncing, speed management |
+| `brick` | Hit tracking, multi-hit support, destruction |
+| `projectile` | Move according to velocity, destroy when off-screen |
+| `shoot` | Fire projectiles at intervals |
+| `descend` | Move downward (patterns: fixed, step, wave) |
+| `oscillate` | Move side-to-side within a range |
 
 ### Lifecycle Events
 
@@ -476,7 +583,7 @@ local my_behavior = {}
 
 function my_behavior.on_spawn(entity_id)
     -- Called when entity is created
-    -- Initialize properties, set up state
+    -- Initialize properties, read spawn properties
 end
 
 function my_behavior.on_update(entity_id, dt)
@@ -484,8 +591,8 @@ function my_behavior.on_update(entity_id, dt)
     -- dt is delta time in seconds
 end
 
-function my_behavior.on_hit(entity_id, other_id, hit_x, hit_y)
-    -- Called on collision (before collision_action)
+function my_behavior.on_hit(entity_id, other_id, other_type, other_base_type)
+    -- Called on collision (legacy - prefer collision_actions)
 end
 
 function my_behavior.on_destroy(entity_id)
@@ -510,7 +617,7 @@ ams.get_y(id), ams.set_y(id, value)
 ams.get_vx(id), ams.set_vx(id, value)
 ams.get_vy(id), ams.set_vy(id, value)
 
--- Size
+-- Size (read-only)
 ams.get_width(id), ams.get_height(id)
 
 -- Health
@@ -533,6 +640,7 @@ ams.get_prop(id, "my_property")
 ams.set_prop(id, "my_property", value)
 
 -- Get behavior config from YAML
+-- Returns config[behavior_name][key] or default_value
 ams.get_config(id, "behavior_name", "key", default_value)
 ```
 
@@ -540,7 +648,8 @@ ams.get_config(id, "behavior_name", "key", default_value)
 
 ```lua
 -- Spawn new entity, returns entity ID
-local new_id = ams.spawn(type, x, y, vx, vy, width, height, color, sprite, behaviors, behavior_config)
+-- If GameEngine has spawn callback, applies entity type config from game.yaml
+local new_id = ams.spawn(type, x, y, vx, vy, width, height, color, sprite)
 ```
 
 #### Queries
@@ -560,14 +669,14 @@ ams.get_screen_width()
 ams.get_screen_height()
 ams.get_score()
 ams.add_score(points)
-ams.get_time()  -- Elapsed game time
+ams.get_time()  -- Elapsed game time in seconds
 ```
 
 #### Events
 
 ```lua
-ams.play_sound("hit.wav")
-ams.schedule(delay_seconds, function_name, entity_id)
+ams.play_sound("hit")  -- Queued for game layer to play
+ams.schedule(delay_seconds, "callback_name", entity_id)
 ```
 
 #### Math Utilities
@@ -587,22 +696,81 @@ ams.clamp(value, min, max)
 ams.log("message")
 ```
 
-### Example: Ball Behavior
+### Behavior Examples
+
+#### paddle.lua
+
+```lua
+--[[
+paddle behavior - stopping paddle that slides to target position
+
+Properties used:
+  paddle_target_x: Target X position (set by game on input)
+
+Config options:
+  speed: float - pixels per second (default: 500)
+  stop_threshold: float - distance to consider "reached" (default: 1.0)
+]]
+
+local paddle = {}
+
+function paddle.on_spawn(entity_id)
+    local x = ams.get_x(entity_id)
+    local width = ams.get_width(entity_id)
+    ams.set_prop(entity_id, "paddle_target_x", x + width / 2)
+end
+
+function paddle.on_update(entity_id, dt)
+    local speed = ams.get_config(entity_id, "paddle", "speed", 500)
+    local threshold = ams.get_config(entity_id, "paddle", "stop_threshold", 1.0)
+
+    local x = ams.get_x(entity_id)
+    local width = ams.get_width(entity_id)
+    local center_x = x + width / 2
+    local target_x = ams.get_prop(entity_id, "paddle_target_x") or center_x
+
+    local distance = target_x - center_x
+    if math.abs(distance) <= threshold then return end
+
+    local direction = distance > 0 and 1 or -1
+    local move_amount = speed * dt
+
+    if math.abs(distance) < move_amount then
+        ams.set_x(entity_id, target_x - width / 2)
+    else
+        ams.set_x(entity_id, x + direction * move_amount)
+    end
+
+    -- Clamp to screen
+    local screen_w = ams.get_screen_width()
+    local new_x = ams.get_x(entity_id)
+    if new_x < 0 then ams.set_x(entity_id, 0)
+    elseif new_x + width > screen_w then ams.set_x(entity_id, screen_w - width) end
+end
+
+return paddle
+```
+
+#### ball.lua
 
 ```lua
 --[[
 ball behavior - bouncing ball with velocity
 
-A ball with zero velocity is stationary (not yet launched).
-On spawn, if speed+angle properties are set, computes velocity.
+Properties used:
+  ball_speed: float - current speed magnitude
+  speed, angle: spawn properties for initial velocity
+
+Config options:
+  speed: float - initial speed (default: 300)
+  max_speed: float - maximum speed (default: 600)
+  speed_increase: float - speed added per brick hit (default: 5)
 ]]
 
 local ball = {}
 
 function ball.on_spawn(entity_id)
-    -- Initialize ball_speed from config default
-    ams.set_prop(entity_id, "ball_speed",
-        ams.get_config(entity_id, "ball", "speed", 300))
+    ams.set_prop(entity_id, "ball_speed", ams.get_config(entity_id, "ball", "speed", 300))
 
     -- If spawned with speed+angle properties, compute velocity
     local speed = ams.get_prop(entity_id, "speed")
@@ -613,7 +781,6 @@ function ball.on_spawn(entity_id)
         ams.set_vx(entity_id, speed * ams.cos(angle_rad))
         ams.set_vy(entity_id, speed * ams.sin(angle_rad))
         ams.set_prop(entity_id, "ball_speed", speed)
-        -- Clear spawn properties
         ams.set_prop(entity_id, "speed", nil)
         ams.set_prop(entity_id, "angle", nil)
     end
@@ -622,116 +789,279 @@ end
 function ball.on_update(entity_id, dt)
     local vx = ams.get_vx(entity_id)
     local vy = ams.get_vy(entity_id)
+    if vx == 0 and vy == 0 then return end
 
-    -- Ball with no velocity doesn't move
-    if vx == 0 and vy == 0 then
-        return
-    end
+    -- Move
+    local x = ams.get_x(entity_id) + vx * dt
+    local y = ams.get_y(entity_id) + vy * dt
+    ams.set_x(entity_id, x)
+    ams.set_y(entity_id, y)
 
-    -- Move ball
-    local x = ams.get_x(entity_id)
-    local y = ams.get_y(entity_id)
-
-    x = x + vx * dt
-    y = y + vy * dt
-
-    -- Bounce off walls
+    -- Wall bouncing
     local w = ams.get_width(entity_id)
+    local h = ams.get_height(entity_id)
     local screen_w = ams.get_screen_width()
 
     if x < 0 then
-        x = 0
-        vx = -vx
+        ams.set_x(entity_id, 0)
+        ams.set_vx(entity_id, -vx)
+        ams.play_sound("wall_bounce")
     elseif x + w > screen_w then
-        x = screen_w - w
-        vx = -vx
+        ams.set_x(entity_id, screen_w - w)
+        ams.set_vx(entity_id, -vx)
+        ams.play_sound("wall_bounce")
     end
 
     if y < 0 then
-        y = 0
-        vy = -vy
+        ams.set_y(entity_id, 0)
+        ams.set_vy(entity_id, -vy)
+        ams.play_sound("wall_bounce")
     end
-
-    ams.set_x(entity_id, x)
-    ams.set_y(entity_id, y)
-    ams.set_vx(entity_id, vx)
-    ams.set_vy(entity_id, vy)
 end
 
 return ball
+```
+
+#### brick.lua
+
+```lua
+--[[
+brick behavior - destructible brick with hit tracking
+
+Properties used:
+  brick_hits_remaining: int - hits left to destroy
+  brick_max_hits: int - original hit count (for damage ratio)
+
+Config options:
+  hits: int - hits required to destroy (default: 1)
+  points: int - points when destroyed (default: 100)
+  indestructible: bool - cannot be destroyed (default: false)
+]]
+
+local brick = {}
+
+function brick.on_spawn(entity_id)
+    local hits = ams.get_config(entity_id, "brick", "hits", 1)
+    ams.set_prop(entity_id, "brick_hits_remaining", hits)
+    ams.set_prop(entity_id, "brick_max_hits", hits)
+end
+
+return brick
+```
+
+#### shoot.lua
+
+```lua
+--[[
+shoot behavior - entity fires projectiles at intervals
+
+Config options:
+  interval: float - seconds between shots (default: 2.0)
+  projectile_type: string - entity type to spawn (default: "projectile")
+  projectile_speed: float - projectile velocity (default: 200)
+  projectile_color: string - projectile color (default: "red")
+  direction: string - "down", "up", "left", "right", "player" (default: "down")
+  offset_x, offset_y: float - spawn offset from center (default: 0)
+]]
+
+local shoot = {}
+
+function shoot.on_spawn(entity_id)
+    local interval = ams.get_config(entity_id, "shoot", "interval", 2.0)
+    ams.set_prop(entity_id, "shoot_timer", ams.random() * interval)
+end
+
+function shoot.on_update(entity_id, dt)
+    local interval = ams.get_config(entity_id, "shoot", "interval", 2.0)
+    local timer = (ams.get_prop(entity_id, "shoot_timer") or 0) + dt
+
+    if timer >= interval then
+        shoot.fire(entity_id)
+        timer = timer - interval
+    end
+
+    ams.set_prop(entity_id, "shoot_timer", timer)
+end
+
+function shoot.fire(entity_id)
+    local projectile_type = ams.get_config(entity_id, "shoot", "projectile_type", "projectile")
+    local speed = ams.get_config(entity_id, "shoot", "projectile_speed", 200)
+    local color = ams.get_config(entity_id, "shoot", "projectile_color", "red")
+    local direction = ams.get_config(entity_id, "shoot", "direction", "down")
+
+    local x = ams.get_x(entity_id) + ams.get_width(entity_id) / 2
+    local y = ams.get_y(entity_id) + ams.get_height(entity_id) / 2
+
+    local vx, vy = 0, 0
+    if direction == "down" then vy = speed
+    elseif direction == "up" then vy = -speed
+    elseif direction == "left" then vx = -speed
+    elseif direction == "right" then vx = speed
+    end
+
+    ams.spawn(projectile_type, x - 4, y, vx, vy, 8, 8, color, "")
+    ams.play_sound("shoot")
+end
+
+return shoot
 ```
 
 ## Collision Actions
 
 Collision actions are Lua scripts that handle what happens when two entities collide. They live in `ams/behaviors/collision_actions/`.
 
+### Available Collision Actions
+
+| Action | Description |
+|--------|-------------|
+| `bounce_paddle` | Ball bounces off paddle with angle based on hit position |
+| `bounce_reflect` | Ball bounces off surface using AABB overlap detection |
+| `take_damage` | Entity takes damage, destroyed when hits reach 0 |
+| `hit_player` | Projectile hits player, sets `was_hit` property |
+
+### Collision Action Interface
+
+```lua
+local my_action = {}
+
+function my_action.execute(entity_a_id, entity_b_id, modifier)
+    -- entity_a: The entity whose collision rule triggered
+    -- entity_b: The other entity
+    -- modifier: Config dict from YAML (or nil)
+end
+
+return my_action
+```
+
+### Collision Action Examples
+
+#### bounce_paddle.lua
+
 ```lua
 --[[
-bounce_paddle - ball bounces off paddle with angle based on hit position
+Bounces entity_a off paddle (entity_b) with angle based on hit position.
+
+Modifier options:
+  max_angle: float - maximum angle from vertical for edge hits (default: 60)
 ]]
 
 local bounce_paddle = {}
 
-function bounce_paddle.execute(ball_id, paddle_id, modifier)
-    local max_angle = modifier and modifier.max_angle or 60
+function bounce_paddle.execute(entity_a_id, entity_b_id, modifier)
+    local vy = ams.get_vy(entity_a_id)
+    if vy <= 0 then return end  -- Only bounce if moving toward paddle
 
-    -- Get positions
-    local ball_x = ams.get_x(ball_id)
-    local ball_w = ams.get_width(ball_id)
-    local ball_center = ball_x + ball_w / 2
-
-    local paddle_x = ams.get_x(paddle_id)
-    local paddle_w = ams.get_width(paddle_id)
+    local paddle_x = ams.get_x(entity_b_id)
+    local paddle_w = ams.get_width(entity_b_id)
     local paddle_center = paddle_x + paddle_w / 2
 
-    -- Calculate hit offset (-1 to 1)
-    local offset = (ball_center - paddle_center) / (paddle_w / 2)
-    offset = ams.clamp(offset, -1, 1)
+    local ball_x = ams.get_x(entity_a_id)
+    local ball_w = ams.get_width(entity_a_id)
+    local ball_center = ball_x + ball_w / 2
 
-    -- Calculate bounce angle
-    local angle = offset * max_angle
-    local angle_rad = (angle - 90) * 3.14159 / 180
+    local offset = ams.clamp((ball_center - paddle_center) / (paddle_w / 2), -1, 1)
+    local max_angle = modifier and modifier.max_angle or 60
 
-    -- Apply new velocity
-    local speed = ams.get_prop(ball_id, "ball_speed") or 300
-    ams.set_vx(ball_id, speed * ams.cos(angle_rad))
-    ams.set_vy(ball_id, speed * ams.sin(angle_rad))
+    local angle = -90 + offset * max_angle
+    local angle_rad = angle * 3.14159 / 180
 
-    ams.play_sound("paddle_hit.wav")
+    local vx = ams.get_vx(entity_a_id)
+    local speed = ams.sqrt(vx * vx + vy * vy)
+
+    ams.set_vx(entity_a_id, speed * ams.cos(angle_rad))
+    ams.set_vy(entity_a_id, speed * ams.sin(angle_rad))
+    ams.play_sound("paddle_hit")
 end
 
 return bounce_paddle
 ```
 
+#### take_damage.lua
+
+```lua
+--[[
+Reduces entity_a's hit points when hit by entity_b.
+
+Modifier options:
+  amount: int - damage per hit (default: 1)
+  hit_sound: string - sound on hit (default: "brick_hit")
+  destroy_sound: string - sound on destroy (default: "brick_break")
+]]
+
+local take_damage = {}
+
+function take_damage.execute(entity_a_id, entity_b_id, modifier)
+    if ams.get_config(entity_a_id, "brick", "indestructible", false) then
+        ams.play_sound(modifier and modifier.hit_sound or "brick_hit")
+        return
+    end
+
+    local hits = (ams.get_prop(entity_a_id, "brick_hits_remaining") or 1)
+    local damage = modifier and modifier.amount or 1
+    hits = hits - damage
+    ams.set_prop(entity_a_id, "brick_hits_remaining", hits)
+
+    if hits <= 0 then
+        local points = ams.get_config(entity_a_id, "brick", "points", 100)
+        ams.add_score(points)
+        ams.destroy(entity_a_id)
+        ams.play_sound(modifier and modifier.destroy_sound or "brick_break")
+    else
+        ams.play_sound(modifier and modifier.hit_sound or "brick_hit")
+    end
+end
+
+return take_damage
+```
+
+#### hit_player.lua
+
+```lua
+--[[
+Projectile hits player - destroys projectile and sets was_hit property.
+
+Modifier options:
+  play_sound: string - sound to play (default: "player_hit")
+]]
+
+local hit_player = {}
+
+function hit_player.execute(projectile_id, player_id, modifier)
+    ams.destroy(projectile_id)
+    ams.play_sound(modifier and modifier.play_sound or "player_hit")
+    ams.set_prop(player_id, "was_hit", true)
+end
+
+return hit_player
+```
+
 ## Skins
 
-Skins provide visual representation. They're Python classes that know how to render entities.
+Skins provide visual representation. The base `GameEngineSkin` handles all rendering via YAML render commands.
 
 ```python
-class GameEngineSkin(ABC):
-    @abstractmethod
+class GameEngineSkin:
     def render_entity(self, entity: Entity, screen) -> None:
-        """Render an entity."""
-        pass
+        """Render entity using YAML render commands."""
+        # Looks up render commands from game definition
+        # Falls back to simple colored rectangle
 
-    def render_hud(self, game, screen) -> None:
-        """Render HUD (score, lives, etc.)."""
-        pass
+    def render_hud(self, screen, score, lives, level_name) -> None:
+        """Render HUD (score, lives, level name)."""
 
     def update(self, dt: float) -> None:
         """Update animations."""
-        pass
 
     def play_sound(self, sound_name: str) -> None:
         """Play a sound effect."""
-        pass
 ```
 
-Skins handle:
-- Entity rendering based on `entity_type`, `color`, `sprite`
-- Composite rendering via `render_as` (e.g., `paddle_ready` renders as paddle + ball)
-- HUD (score, lives, level name)
-- Sound effects
+For fully data-driven games, the skin can be an empty subclass:
+
+```python
+class BrickBreakerNGSkin(GameEngineSkin):
+    pass  # All rendering handled by base class via game.yaml
+```
 
 ## Creating a New Game
 
@@ -743,17 +1073,37 @@ Skins handle:
 ```python
 from games.common.game_engine import GameEngine, GameEngineSkin
 from pathlib import Path
+import yaml
+
+def _load_game_metadata():
+    game_yaml = Path(__file__).parent / 'game.yaml'
+    with open(game_yaml) as f:
+        data = yaml.safe_load(f)
+        return {
+            'name': data.get('name', 'Unnamed'),
+            'description': data.get('description', ''),
+            'version': data.get('version', '1.0.0'),
+            'author': data.get('author', ''),
+            'defaults': data.get('defaults', {}),
+        }
+
+_GAME_META = _load_game_metadata()
+
 
 class MyGameSkin(GameEngineSkin):
-    def render_entity(self, entity, screen):
-        # Render based on entity.entity_type, entity.color, etc.
-        pass
+    pass  # YAML-driven rendering
+
 
 class MyGameMode(GameEngine):
-    NAME = "My Game"
-    GAME_DEF_FILE = Path(__file__).parent / 'game.yaml'
+    NAME = _GAME_META['name']
+    DESCRIPTION = _GAME_META['description']
+    VERSION = _GAME_META['version']
+    AUTHOR = _GAME_META['author']
 
-    def _get_skin(self) -> GameEngineSkin:
+    GAME_DEF_FILE = Path(__file__).parent / 'game.yaml'
+    LEVELS_DIR = Path(__file__).parent / 'levels'
+
+    def _get_skin(self, skin_name: str) -> GameEngineSkin:
         return MyGameSkin()
 ```
 
@@ -771,33 +1121,51 @@ def get_game_mode():
 
 ```
 games/MyGame/
-├── __init__.py           # Lazy import to avoid circular deps
+├── __init__.py           # Lazy import
 ├── game_info.py          # Factory function
 ├── game_mode.py          # GameEngine subclass + skin
 ├── game.yaml             # Game definition
+├── level_loader.py       # Optional: custom level loader
 └── levels/               # Optional level files
     ├── level_01.yaml
     └── campaign.yaml
 
 ams/behaviors/
+├── engine.py             # BehaviorEngine
+├── entity.py             # Entity class
+├── api.py                # LuaAPI class
 ├── lua/                  # Entity behaviors
 │   ├── ball.lua
 │   ├── paddle.lua
 │   ├── brick.lua
-│   └── ...
+│   ├── projectile.lua
+│   ├── shoot.lua
+│   ├── descend.lua
+│   └── oscillate.lua
 └── collision_actions/    # Collision handlers
     ├── bounce_paddle.lua
     ├── bounce_reflect.lua
-    └── take_damage.lua
+    ├── take_damage.lua
+    └── hit_player.lua
 ```
 
-## Architecture Test
+## Architecture Validation
 
-> "The architecture is working if a new Breakout variant requires only YAML and sprites."
+> "The architecture is working if a new game variant requires only YAML and assets."
 >
 > "The architecture is failing if 'simple' game variants require Python changes."
 
-To add a new brick type with unique behavior:
+Checklist for adding a new brick type with unique behavior:
 1. Add entry to `entity_types:` in game.yaml ✓
 2. Create Lua behavior if needed ✓
-3. No Python changes required ✓
+3. Add collision behavior if needed ✓
+4. No Python changes required ✓
+
+Checklist for adding Space Invaders mode to BrickBreaker:
+1. Add `invader`, `invader_shooter` entity types (extend brick) ✓
+2. Add `descend`, `shoot`, `oscillate` behaviors ✓
+3. Add `projectile` entity type ✓
+4. Add `projectile->paddle: hit_player` collision ✓
+5. Add `property_true` lose condition for `was_hit` ✓
+6. Create level YAML with invader layout ✓
+7. No Python changes required ✓
