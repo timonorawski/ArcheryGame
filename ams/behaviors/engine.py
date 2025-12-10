@@ -4,14 +4,16 @@ Behavior Engine - manages Lua VM and entity behaviors.
 The engine:
 1. Initializes the Lua runtime
 2. Loads behavior scripts (single-entity) and collision actions (two-entity)
-3. Attaches behaviors to entities
-4. Calls behavior lifecycle hooks (on_update, on_hit, on_spawn, on_destroy)
-5. Dispatches collision actions when entities collide
-6. Manages entity spawning and destruction
+3. Loads generator scripts for dynamic property values
+4. Attaches behaviors to entities
+5. Calls behavior lifecycle hooks (on_update, on_hit, on_spawn, on_destroy)
+6. Dispatches collision actions when entities collide
+7. Manages entity spawning and destruction
 
 Directory structure:
-- ams/behaviors/lua/           - Entity behaviors (single entity)
+- ams/behaviors/lua/               - Entity behaviors (single entity)
 - ams/behaviors/collision_actions/ - Collision actions (two entities)
+- ams/behaviors/generators/        - Property generators (return computed values)
 """
 
 from pathlib import Path
@@ -52,6 +54,7 @@ class BehaviorEngine:
     # Default paths for Lua scripts
     BEHAVIORS_DIR = Path(__file__).parent / 'lua'
     COLLISION_ACTIONS_DIR = Path(__file__).parent / 'collision_actions'
+    GENERATORS_DIR = Path(__file__).parent / 'generators'
 
     def __init__(self, screen_width: float = 800, screen_height: float = 600):
         self.screen_width = screen_width
@@ -67,6 +70,9 @@ class BehaviorEngine:
 
         # Loaded collision actions (name -> lua function table)
         self._collision_actions: dict[str, Any] = {}
+
+        # Loaded property generators (name -> lua function table)
+        self._generators: dict[str, Any] = {}
 
         # Pending entity spawns/destroys (processed end of frame)
         self._pending_spawns: list[Entity] = []
@@ -126,6 +132,8 @@ class BehaviorEngine:
 
         ams.spawn = api.spawn
         ams.get_entities_of_type = api.get_entities_of_type
+        ams.get_entities_by_tag = api.get_entities_by_tag
+        ams.count_entities_by_tag = api.count_entities_by_tag
         ams.get_all_entity_ids = api.get_all_entity_ids
 
         ams.get_screen_width = api.get_screen_width
@@ -149,7 +157,7 @@ class BehaviorEngine:
 
     def load_behavior(self, name: str, path: Optional[Path] = None) -> bool:
         """
-        Load a behavior script.
+        Load a behavior script from file.
 
         If path is None, looks in BEHAVIORS_DIR for {name}.lua.
 
@@ -186,6 +194,48 @@ class BehaviorEngine:
 
         except Exception as e:
             print(f"[BehaviorEngine] Error loading {name}: {e}")
+            return False
+
+    def load_inline_behavior(self, name: str, lua_code: str) -> bool:
+        """
+        Load an inline Lua behavior from a code string.
+
+        The code should define a behavior table with lifecycle methods
+        (on_spawn, on_update, on_hit, on_destroy) and return it.
+
+        Example inline behavior in YAML:
+            behaviors:
+              - lua: |
+                  local behavior = {}
+                  function behavior.on_update(entity_id, dt)
+                      local x = ams.get_x(entity_id) + 10 * dt
+                      ams.set_x(entity_id, x)
+                  end
+                  return behavior
+
+        Args:
+            name: Unique name for this inline behavior
+            lua_code: Lua source code defining the behavior table
+
+        Returns:
+            True if loaded successfully
+        """
+        if name in self._behaviors:
+            return True  # Already loaded
+
+        try:
+            # Execute the Lua code - it should return a table
+            result = self._lua.execute(lua_code)
+
+            if result is None:
+                print(f"[BehaviorEngine] Inline behavior {name} did not return a table")
+                return False
+
+            self._behaviors[name] = result
+            return True
+
+        except Exception as e:
+            print(f"[BehaviorEngine] Error loading inline behavior {name}: {e}")
             return False
 
     def load_behaviors_from_dir(self, directory: Optional[Path] = None) -> int:
@@ -254,6 +304,50 @@ class BehaviorEngine:
                     count += 1
         return count
 
+    def load_inline_collision_action(self, name: str, lua_code: str) -> bool:
+        """
+        Load an inline collision action from a Lua code string.
+
+        The code should define a table with an `execute(entity_a_id, entity_b_id, modifier)`
+        function and return it.
+
+        Example inline collision action in YAML:
+            collision_behaviors:
+              ball:
+                brick:
+                  action:
+                    lua: |
+                      local action = {}
+                      function action.execute(a_id, b_id, modifier)
+                          ams.destroy(b_id)
+                          ams.add_score(100)
+                      end
+                      return action
+
+        Args:
+            name: Unique name for this inline collision action
+            lua_code: Lua source code defining the action table
+
+        Returns:
+            True if loaded successfully
+        """
+        if name in self._collision_actions:
+            return True  # Already loaded
+
+        try:
+            result = self._lua.execute(lua_code)
+
+            if result is None:
+                print(f"[BehaviorEngine] Inline collision action {name} did not return a table")
+                return False
+
+            self._collision_actions[name] = result
+            return True
+
+        except Exception as e:
+            print(f"[BehaviorEngine] Error loading inline collision action {name}: {e}")
+            return False
+
     def execute_collision_action(
         self,
         action_name: str,
@@ -299,6 +393,104 @@ class BehaviorEngine:
         except Exception as e:
             print(f"[BehaviorEngine] Error executing collision action {action_name}: {e}")
             return False
+
+    def load_generator(self, name: str, path: Optional[Path] = None) -> bool:
+        """
+        Load a property generator script.
+
+        Property generators compute dynamic property values. They expose a
+        `generate(args)` function that takes a Lua table of arguments and
+        returns a computed value.
+
+        Use case: Complex property calculations like grid positions, color
+        interpolation, pattern generation, etc.
+
+        If path is None, looks in GENERATORS_DIR for {name}.lua.
+
+        Returns True if loaded successfully.
+        """
+        if name in self._generators:
+            return True  # Already loaded
+
+        if path is None:
+            path = self.GENERATORS_DIR / f"{name}.lua"
+
+        if not path.exists():
+            print(f"[BehaviorEngine] Generator not found: {path}")
+            return False
+
+        try:
+            code = path.read_text()
+            result = self._lua.execute(code)
+
+            if result is None:
+                g = self._lua.globals()
+                result = getattr(g, name, None)
+
+            if result is None:
+                print(f"[BehaviorEngine] Generator {name} did not return a table")
+                return False
+
+            self._generators[name] = result
+            return True
+
+        except Exception as e:
+            print(f"[BehaviorEngine] Error loading generator {name}: {e}")
+            return False
+
+    def load_generators_from_dir(self, directory: Optional[Path] = None) -> int:
+        """Load all generator .lua files from directory. Returns count loaded."""
+        if directory is None:
+            directory = self.GENERATORS_DIR
+
+        count = 0
+        if directory.exists():
+            for lua_file in directory.glob("*.lua"):
+                name = lua_file.stem
+                if self.load_generator(name, lua_file):
+                    count += 1
+        return count
+
+    def call_generator(self, name: str, args: Optional[dict[str, Any]] = None) -> Any:
+        """
+        Call a property generator to compute a value.
+
+        Args:
+            name: Name of the generator (must be loaded or loadable)
+            args: Arguments to pass to the generator (converted to Lua table)
+
+        Returns:
+            The computed value from the generator
+
+        Usage in YAML:
+            property: {call: "grid_position", args: {row: 1, col: 5}}
+        """
+        # Load generator if not already loaded
+        if name not in self._generators:
+            if not self.load_generator(name):
+                return None
+
+        generator = self._generators.get(name)
+        if not generator:
+            return None
+
+        generate_fn = getattr(generator, 'generate', None)
+        if not generate_fn:
+            print(f"[BehaviorEngine] Generator {name} has no generate function")
+            return None
+
+        try:
+            # Convert args dict to Lua table if provided
+            lua_args = None
+            if args:
+                lua_args = self._lua.table_from(args)
+
+            result = generate_fn(lua_args)
+            return result
+
+        except Exception as e:
+            print(f"[BehaviorEngine] Error calling generator {name}: {e}")
+            return None
 
     def create_entity(
         self,
@@ -410,25 +602,55 @@ class BehaviorEngine:
         # Call on_spawn for new behaviors
         self._call_lifecycle('on_spawn', entity)
 
-    def evaluate_expression(self, expression: str) -> float:
-        """Evaluate a Lua expression and return the result.
+    def evaluate_expression(self, expression: str) -> Any:
+        """Evaluate a Lua expression or block and return the result.
 
-        Used for dynamic values in spawn configs like:
-            angle: {lua: "ams.random_range(-60, -120)"}
+        Supports two modes:
+        1. Single-line expression: Evaluated directly
+           angle: {lua: "ams.random_range(-60, -120)"}
 
-        The expression must be complete Lua code - use ams.* explicitly.
+        2. Multiline block: Executed as function body, returns last expression
+           win_condition:
+             lua: |
+               local bricks = ams.count_entities_by_tag("brick")
+               return bricks == 0
+
+        The ams.* API is available in both modes.
 
         Args:
-            expression: Lua expression string (e.g., "ams.random_range(-60, -120)")
+            expression: Lua expression or block string
 
         Returns:
-            Evaluated result as float
+            Evaluated result (any type - number, boolean, table, etc.)
         """
         try:
-            result = self._lua.eval(expression)
-            return float(result)
-        except Exception:
-            return 0.0
+            # Check if multiline (contains newlines or 'return')
+            is_multiline = '\n' in expression or expression.strip().startswith('return') \
+                          or 'local ' in expression
+
+            if is_multiline:
+                # Wrap in function and execute to get return value
+                # Strip leading/trailing whitespace but preserve internal structure
+                code = expression.strip()
+
+                # Ensure there's a return statement if not present
+                if not code.startswith('return') and 'return ' not in code:
+                    # Wrap entire block as return value
+                    code = f"return {code}"
+
+                # Create anonymous function and call it immediately
+                wrapped = f"return (function()\n{code}\nend)()"
+                result = self._lua.execute(wrapped)
+                return result
+            else:
+                # Simple expression - use eval
+                result = self._lua.eval(expression)
+                return result
+
+        except Exception as e:
+            print(f"[BehaviorEngine] Lua error in expression: {e}")
+            print(f"  Expression: {expression[:100]}...")
+            return None
 
     def set_global(self, name: str, value: Any) -> None:
         """Set a global variable in the Lua environment.

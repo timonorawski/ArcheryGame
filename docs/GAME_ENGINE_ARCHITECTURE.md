@@ -143,17 +143,36 @@ assets:
   sounds:
     # Sound name -> path (relative to assets/ directory)
     paddle_hit: sounds/paddle_hit.wav
-    wall_bounce: sounds/wall_bounce.wav
     brick_hit: sounds/brick_hit.wav
-    brick_break: sounds/brick_break.wav
-    shoot: sounds/shoot.wav
-    player_hit: sounds/player_hit.wav
 
   sprites:
-    # Sprite name -> path (for classic skin)
+    # Simple image file
     paddle: sprites/paddle.png
-    ball: sprites/ball.png
+
+    # With transparency color key
+    ball:
+      file: sprites/ball.png
+      transparent: [255, 0, 255]  # Magenta = transparent
+
+    # Sprite sheet region
+    duck_flying:
+      file: sprites/ducks.png
+      x: 0
+      y: 126
+      width: 37
+      height: 42
+      transparent: [159, 227, 163]  # Light green
 ```
+
+#### Sprite Formats
+
+| Format | Fields | Description |
+|--------|--------|-------------|
+| Simple path | `name: path` | Load full image |
+| With transparency | `file`, `transparent` | Image with color key |
+| Sheet region | `file`, `x`, `y`, `width`, `height`, `transparent` | Extract region from sprite sheet |
+
+The `transparent` field is an RGB array `[r, g, b]` - that color becomes transparent.
 
 #### How It Works
 
@@ -314,7 +333,7 @@ entity_types:
   invader_shooter:
     extends: brick
     color: purple
-    behaviors: [brick, descend, shoot]
+    behaviors: [brick, descend, shoot]  # File-based behaviors
     behavior_config:
       brick:
         hits: 2
@@ -586,6 +605,106 @@ input_mapping:
 | `lifetime` | float | null | Auto-set on spawned entity |
 | `$property` | any | - | Reference parent property (e.g., `$color`) |
 | `{lua: ...}` | any | - | Dynamic value evaluated at spawn |
+| `{call: ...}` | any | - | Generator script call (see below) |
+
+### Dynamic Property Values
+
+Property values throughout YAML can use three evaluation methods:
+
+#### Literal Values
+
+Simple values used as-is:
+
+```yaml
+speed: 300
+color: red
+offset: [10, 20]
+```
+
+#### Lua Expressions
+
+Inline Lua for one-off calculations. Use `{lua: "expression"}`:
+
+```yaml
+angle: {lua: "ams.random_range(-120, -60)"}
+vx: {lua: "ams.random_range(-100, 100)"}
+```
+
+The `ams.*` API is available in expressions.
+
+#### Multiline Lua Blocks
+
+For complex logic with local variables, use YAML multiline syntax:
+
+```yaml
+# Win condition: all bricks destroyed
+win_condition:
+  lua: |
+    local count = ams.count_entities_by_tag("brick")
+    return count == 0
+
+# Score-based win
+win_condition:
+  lua: |
+    local score = ams.get_score()
+    local time = ams.get_time()
+    return score >= 10000 or time >= 60
+
+# Complex spawn velocity calculation
+vx:
+  lua: |
+    local angle = ams.random_range(30, 150)
+    local speed = 200
+    return speed * ams.cos(angle * 3.14159 / 180)
+```
+
+Multiline blocks are wrapped in an anonymous function, so:
+
+- Use `local` for variables
+- Include `return` to provide the result
+- Full Lua syntax is available (if/else, loops, etc.)
+
+#### Generator Scripts
+
+For complex/reusable computations. Use `{call: "script", args: {...}}`:
+
+```yaml
+# Calculate grid position from indices
+x: {call: "grid_position", args: {index: 5, start: 65, spacing: 75}}
+
+# Blend colors dynamically
+color: {call: "color_blend", args: {from: "red", to: "yellow", factor: 0.5}}
+
+# Args can contain nested Lua expressions
+x: {call: "grid_position", args: {
+  index: {lua: "ams.random(1, 10)"},
+  start: 100,
+  spacing: 50
+}}
+```
+
+#### Generator Script Structure
+
+Generators live in `ams/behaviors/generators/` and expose a `generate(args)` function:
+
+```lua
+-- grid_position.lua
+local grid_position = {}
+
+function grid_position.generate(args)
+    local index = args.index or 0
+    local start = args.start or 0
+    local spacing = args.spacing or 0
+    return start + (index * spacing)
+end
+
+return grid_position
+```
+
+Built-in generators:
+
+- `grid_position` - Calculate pixel position from grid coordinates
+- `color_blend` - Interpolate between two colors
 
 ### Lifecycle Transforms
 
@@ -700,7 +819,36 @@ For `destroy_all`, the engine counts entities whose `base_type` matches `win_tar
 
 ## Lua Behaviors
 
-Behaviors are Lua scripts that define entity logic. They live in `ams/behaviors/lua/`.
+Behaviors are Lua scripts that define entity logic. They can be:
+
+1. **File-based**: Scripts in `ams/behaviors/lua/` (for reusable behaviors)
+2. **Inline**: Lua code embedded directly in game.yaml (for rapid prototyping)
+
+### Inline Behaviors
+
+For quick prototyping, define behaviors directly in YAML:
+
+```yaml
+entity_types:
+  wobbling_brick:
+    extends: brick
+    behaviors:
+      - brick                    # File-based (brick.lua)
+      - lua: |                   # Inline Lua
+          local wobble = {}
+          function wobble.on_update(entity_id, dt)
+              local t = ams.get_time()
+              local base_x = ams.get_prop(entity_id, "start_x") or ams.get_x(entity_id)
+              if not ams.get_prop(entity_id, "start_x") then
+                  ams.set_prop(entity_id, "start_x", base_x)
+              end
+              ams.set_x(entity_id, base_x + math.sin(t * 3) * 5)
+          end
+          return wobble
+```
+
+Inline behaviors have full access to the `ams.*` API, identical to file-based behaviors.
+When a behavior is reused across multiple entity types, promote it to a file.
 
 ### Available Behaviors
 
@@ -795,6 +943,12 @@ local new_id = ams.spawn(type, x, y, vx, vy, width, height, color, sprite)
 ```lua
 -- Get entity IDs by type
 local ids = ams.get_entities_of_type("brick")
+
+-- Get entity IDs by tag
+local enemies = ams.get_entities_by_tag("enemy")
+
+-- Count entities by tag (useful for win conditions)
+local brick_count = ams.count_entities_by_tag("brick")
 
 -- Get all entity IDs
 local all_ids = ams.get_all_entity_ids()
@@ -1046,7 +1200,38 @@ return shoot
 
 ## Collision Actions
 
-Collision actions are Lua scripts that handle what happens when two entities collide. They live in `ams/behaviors/collision_actions/`.
+Collision actions are Lua scripts that handle what happens when two entities collide. They can be:
+
+1. **File-based**: Scripts in `ams/behaviors/collision_actions/` (for reusable actions)
+2. **Inline**: Lua code embedded directly in game.yaml (for rapid prototyping)
+
+### Inline Collision Actions
+
+For quick prototyping, define collision actions directly in YAML:
+
+```yaml
+collision_behaviors:
+  ball:
+    # File-based action
+    paddle:
+      action: bounce_paddle
+      modifier:
+        max_angle: 60
+
+    # Inline Lua action
+    powerup:
+      action:
+        lua: |
+          local a = {}
+          function a.execute(ball_id, powerup_id, mod)
+              ams.destroy(powerup_id)
+              ams.set_prop(ball_id, "powered_up", true)
+              ams.play_sound("powerup")
+          end
+          return a
+```
+
+Inline collision actions have full access to the `ams.*` API.
 
 ### Available Collision Actions
 

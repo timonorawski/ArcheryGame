@@ -45,9 +45,24 @@ assets:
     player_hit: sounds/player_hit.wav
 
   sprites: {}
-    # Add sprite mappings here when using classic skin
-    # paddle: sprites/paddle.png
-    # ball: sprites/ball.png
+    # Sprite formats:
+    #
+    # Simple image file:
+    #   paddle: sprites/paddle.png
+    #
+    # With transparency color key:
+    #   paddle:
+    #     file: sprites/paddle.png
+    #     transparent: [255, 0, 255]  # Magenta = transparent
+    #
+    # Sprite sheet region:
+    #   duck_flying:
+    #     file: sprites/ducks.png
+    #     x: 0
+    #     y: 126
+    #     width: 37
+    #     height: 42
+    #     transparent: [159, 227, 163]  # Light green
 
 # =============================================================================
 # Entity Type Definitions

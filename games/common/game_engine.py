@@ -211,12 +211,47 @@ class InputMappingConfig:
 
 
 @dataclass
+class SpriteRegion:
+    """A rectangular region within a sprite sheet."""
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+@dataclass
+class SpriteSheet:
+    """A sprite sheet with named regions."""
+    file: str  # Path to image file
+    transparent: Optional[Tuple[int, int, int]] = None  # RGB color key for transparency
+    regions: Dict[str, SpriteRegion] = field(default_factory=dict)  # Named regions
+
+
+@dataclass
+class SpriteConfig:
+    """Configuration for a sprite - either simple file or sheet with regions."""
+    file: str  # Path to image file
+    transparent: Optional[Tuple[int, int, int]] = None  # RGB color key
+    # For sprite sheets:
+    x: Optional[int] = None  # Region x offset
+    y: Optional[int] = None  # Region y offset
+    width: Optional[int] = None  # Region width (None = full image)
+    height: Optional[int] = None  # Region height (None = full image)
+
+
+@dataclass
 class AssetsConfig:
-    """Configuration for game assets (sounds, sprites)."""
+    """Configuration for game assets (sounds, sprites).
+
+    Sprites can be defined in three ways:
+    1. Simple path: "paddle: sprites/paddle.png"
+    2. With transparency: "paddle: {file: sprites/paddle.png, transparent: [255, 0, 255]}"
+    3. Sprite sheet region: "duck_flying: {file: sprites/ducks.png, x: 0, y: 126, width: 37, height: 42}"
+    """
     # Sound name -> file path mapping
     sounds: Dict[str, str] = field(default_factory=dict)
-    # Sprite name -> file path mapping
-    sprites: Dict[str, str] = field(default_factory=dict)
+    # Sprite name -> SpriteConfig mapping
+    sprites: Dict[str, SpriteConfig] = field(default_factory=dict)
 
 
 @dataclass
@@ -277,6 +312,8 @@ class GameEngineSkin:
     def __init__(self):
         self._game_def: Optional[GameDefinition] = None
         self._sounds: Dict[str, pygame.mixer.Sound] = {}
+        self._sprites: Dict[str, pygame.Surface] = {}  # Loaded sprite surfaces
+        self._sprite_sheets: Dict[str, pygame.Surface] = {}  # Cached full sheets
         self._assets_dir: Optional[Path] = None
         self._elapsed_time: float = 0.0  # Set by engine each frame
 
@@ -286,6 +323,7 @@ class GameEngineSkin:
         self._game_def = game_def
         self._assets_dir = assets_dir
         self._load_sounds()
+        self._load_sprites()
 
     def render_entity(self, entity: Entity, screen: pygame.Surface) -> None:
         """Render an entity using YAML render commands or fallback."""
@@ -479,10 +517,32 @@ class GameEngineSkin:
 
     def _render_sprite(self, entity: Entity, sprite_name: str,
                        screen: pygame.Surface, x: int, y: int, w: int, h: int) -> None:
-        """Render a sprite. Override in subclasses for actual sprite loading."""
-        # Default: fallback to colored rectangle
-        color = self._parse_color(entity.color)
-        pygame.draw.rect(screen, color, pygame.Rect(x, y, w, h))
+        """Render a sprite from loaded assets."""
+        if not sprite_name:
+            # No sprite specified, fallback to colored rectangle
+            color = self._parse_color(entity.color)
+            pygame.draw.rect(screen, color, pygame.Rect(x, y, w, h))
+            return
+
+        # Check if sprite is loaded
+        sprite = self._sprites.get(sprite_name)
+        if sprite is None:
+            # Fallback to colored rectangle
+            color = self._parse_color(entity.color)
+            pygame.draw.rect(screen, color, pygame.Rect(x, y, w, h))
+            return
+
+        # Scale sprite to entity size
+        sprite_w, sprite_h = sprite.get_size()
+        if sprite_w != w or sprite_h != h:
+            scaled = pygame.transform.scale(sprite, (int(w), int(h)))
+            # Preserve transparency after scaling
+            colorkey = sprite.get_colorkey()
+            if colorkey:
+                scaled.set_colorkey(colorkey)
+            screen.blit(scaled, (x, y))
+        else:
+            screen.blit(sprite, (x, y))
 
     def _resolve_color(self, entity: Entity, color_ref: str) -> Tuple[int, int, int]:
         """Resolve color reference (e.g., $color) to RGB."""
@@ -544,6 +604,61 @@ class GameEngineSkin:
                 self._sounds[name] = pygame.mixer.Sound(str(sound_path))
         except Exception as e:
             print(f"[GameEngineSkin] Failed to load sound '{name}': {e}")
+
+    def _load_sprites(self) -> None:
+        """Load sprites defined in game definition assets."""
+        self._sprites.clear()
+        self._sprite_sheets.clear()
+        if not self._game_def:
+            return
+
+        for sprite_name, sprite_config in self._game_def.assets.sprites.items():
+            self._load_sprite(sprite_name, sprite_config)
+
+    def _load_sprite(self, name: str, config: SpriteConfig) -> None:
+        """Load a single sprite from config.
+
+        Supports:
+        - Full image files (no region specified)
+        - Regions within sprite sheets (x, y, width, height specified)
+        - Transparency via color key
+        """
+        try:
+            # Resolve path relative to assets_dir
+            sprite_path = Path(config.file)
+            if not sprite_path.is_absolute() and self._assets_dir:
+                sprite_path = self._assets_dir / config.file
+
+            if not sprite_path.exists():
+                print(f"[GameEngineSkin] Sprite file not found: {sprite_path}")
+                return
+
+            # Load or get cached sheet
+            sheet_key = str(sprite_path)
+            if sheet_key not in self._sprite_sheets:
+                sheet = pygame.image.load(str(sprite_path)).convert()
+                self._sprite_sheets[sheet_key] = sheet
+            else:
+                sheet = self._sprite_sheets[sheet_key]
+
+            # Extract region or use full image
+            if config.x is not None and config.y is not None:
+                # Extract region from sprite sheet
+                w = config.width or (sheet.get_width() - config.x)
+                h = config.height or (sheet.get_height() - config.y)
+                sprite = sheet.subsurface(pygame.Rect(config.x, config.y, w, h)).copy()
+            else:
+                # Use full image
+                sprite = sheet.copy()
+
+            # Apply transparency color key
+            if config.transparent:
+                sprite.set_colorkey(config.transparent)
+
+            self._sprites[name] = sprite
+
+        except Exception as e:
+            print(f"[GameEngineSkin] Failed to load sprite '{name}': {e}")
 
     def _parse_color(self, color_str: str) -> Tuple[int, int, int]:
         """Parse color string to RGB tuple."""
@@ -614,6 +729,10 @@ class GameEngine(BaseGame):
         self._game_def: Optional[GameDefinition] = None
         self._level_name = ""
 
+        # Counters for generating unique inline names
+        self._inline_behavior_counter = 0
+        self._inline_collision_action_counter = 0
+
         # Create behavior engine
         self._behavior_engine = BehaviorEngine(
             screen_width=width,
@@ -658,9 +777,10 @@ class GameEngine(BaseGame):
 
         # Parse assets section
         assets_data = data.get('assets', {})
+        sprites_config = self._parse_sprites_config(assets_data.get('sprites', {}))
         assets_config = AssetsConfig(
             sounds=assets_data.get('sounds', {}),
-            sprites=assets_data.get('sprites', {}),
+            sprites=sprites_config,
         )
 
         game_def = GameDefinition(
@@ -722,13 +842,16 @@ class GameEngine(BaseGame):
                 for update_data in type_data['on_update']:
                     on_update.append(self._parse_on_update_transform(update_data))
 
+            # Parse behaviors (strings for files, dicts with lua: for inline)
+            behaviors = self._parse_behaviors(name, type_data.get('behaviors', []))
+
             game_def.entity_types[name] = EntityTypeConfig(
                 name=name,
                 width=type_data.get('width', 32),
                 height=type_data.get('height', 32),
                 color=type_data.get('color', 'white'),
                 sprite=type_data.get('sprite', ''),
-                behaviors=type_data.get('behaviors', []),
+                behaviors=behaviors,
                 behavior_config=type_data.get('behavior_config', {}),
                 health=type_data.get('health', 1),
                 points=type_data.get('points', 0),
@@ -756,25 +879,33 @@ class GameEngine(BaseGame):
         # collision_behaviors:
         #   ball:
         #     paddle:
-        #       action: bounce_paddle
+        #       action: bounce_paddle           # File-based
         #       modifier:
         #         max_angle: 60
+        #   OR inline:
+        #     brick:
+        #       action:
+        #         lua: |
+        #           local a = {}
+        #           function a.execute(a_id, b_id, mod)
+        #               ams.destroy(b_id)
+        #           end
+        #           return a
         raw_collision_behaviors = data.get('collision_behaviors', {})
         for type_a, targets in raw_collision_behaviors.items():
             if type_a not in game_def.collision_behaviors:
                 game_def.collision_behaviors[type_a] = {}
             for type_b, action_data in targets.items():
-                if isinstance(action_data, str):
-                    # Simple format: just action name
-                    game_def.collision_behaviors[type_a][type_b] = CollisionAction(
-                        action=action_data
-                    )
-                elif isinstance(action_data, dict):
-                    # Full format with modifier
-                    game_def.collision_behaviors[type_a][type_b] = CollisionAction(
-                        action=action_data.get('action', ''),
-                        modifier=action_data.get('modifier', {})
-                    )
+                action_name = self._parse_collision_action(
+                    type_a, type_b, action_data
+                )
+                modifier = {}
+                if isinstance(action_data, dict):
+                    modifier = action_data.get('modifier', {})
+                game_def.collision_behaviors[type_a][type_b] = CollisionAction(
+                    action=action_name,
+                    modifier=modifier
+                )
 
         # Parse input_mapping
         # Format in YAML:
@@ -880,6 +1011,110 @@ class GameEngine(BaseGame):
             properties=props,
         )
 
+    def _parse_behaviors(self, entity_type: str, behaviors_data: List[Any]) -> List[str]:
+        """Parse behaviors list, handling both file references and inline Lua.
+
+        Behaviors can be:
+        - String: Reference to file in behaviors directory (e.g., "paddle")
+        - Dict with 'lua' key: Inline Lua code
+
+        Example YAML:
+            behaviors:
+              - paddle              # loads paddle.lua
+              - lua: |
+                  local b = {}
+                  function b.on_update(id, dt)
+                      ams.log("Custom behavior!")
+                  end
+                  return b
+
+        Returns list of behavior names (inline behaviors get generated names).
+        """
+        behavior_names: List[str] = []
+
+        for item in behaviors_data:
+            if isinstance(item, str):
+                # File-based behavior
+                behavior_names.append(item)
+            elif isinstance(item, dict) and 'lua' in item:
+                # Inline Lua behavior
+                lua_code = item['lua']
+                name = f"_inline_{entity_type}_{self._inline_behavior_counter}"
+                self._inline_behavior_counter += 1
+
+                # Register inline behavior with engine
+                if self._behavior_engine.load_inline_behavior(name, lua_code):
+                    behavior_names.append(name)
+                else:
+                    print(f"[GameEngine] Failed to load inline behavior for {entity_type}")
+
+        return behavior_names
+
+    def _parse_collision_action(
+        self, type_a: str, type_b: str, action_data: Any
+    ) -> str:
+        """Parse a collision action, handling both file references and inline Lua.
+
+        Args:
+            type_a: First entity type in collision
+            type_b: Second entity type in collision
+            action_data: Can be:
+                - str: Action name (file reference)
+                - dict with 'action' key: File reference with modifier
+                - dict with 'action.lua' key: Inline Lua
+
+        Returns:
+            Action name (inline actions get generated names).
+
+        Example YAML formats:
+            # Simple file reference
+            ball:
+              paddle: bounce_paddle
+
+            # File with modifier
+            ball:
+              brick:
+                action: take_damage
+                modifier:
+                  damage: 1
+
+            # Inline Lua
+            ball:
+              powerup:
+                action:
+                  lua: |
+                    local a = {}
+                    function a.execute(a_id, b_id, mod)
+                        ams.destroy(b_id)
+                        ams.set_prop(a_id, "powered_up", true)
+                    end
+                    return a
+        """
+        if isinstance(action_data, str):
+            # Simple format: just action name string
+            return action_data
+
+        if isinstance(action_data, dict):
+            action_field = action_data.get('action', '')
+
+            if isinstance(action_field, str):
+                # File-based action
+                return action_field
+
+            if isinstance(action_field, dict) and 'lua' in action_field:
+                # Inline Lua action
+                lua_code = action_field['lua']
+                name = f"_inline_collision_{type_a}_{type_b}_{self._inline_collision_action_counter}"
+                self._inline_collision_action_counter += 1
+
+                if self._behavior_engine.load_inline_collision_action(name, lua_code):
+                    return name
+                else:
+                    print(f"[GameEngine] Failed to load inline collision action for {type_a}->{type_b}")
+                    return ''
+
+        return ''
+
     def _parse_transform_config(self, data: Dict[str, Any]) -> TransformConfig:
         """Parse a transform config from YAML."""
         children = []
@@ -921,6 +1156,39 @@ class GameEngine(BaseGame):
             transform = self._parse_transform_config(data['transform'])
 
         return OnUpdateTransform(when=when, transform=transform)
+
+    def _parse_sprites_config(self, sprites_data: Dict[str, Any]) -> Dict[str, SpriteConfig]:
+        """Parse sprites configuration from YAML.
+
+        Supports three formats:
+        1. Simple path string: "paddle: sprites/paddle.png"
+        2. Dict with file and optional transparency: {file: ..., transparent: [r, g, b]}
+        3. Dict with region: {file: ..., x: 0, y: 0, width: 32, height: 32}
+        """
+        result: Dict[str, SpriteConfig] = {}
+
+        for name, sprite_data in sprites_data.items():
+            if isinstance(sprite_data, str):
+                # Simple path string
+                result[name] = SpriteConfig(file=sprite_data)
+            elif isinstance(sprite_data, dict):
+                # Dict format with optional fields
+                transparent = None
+                if 'transparent' in sprite_data:
+                    t = sprite_data['transparent']
+                    if isinstance(t, (list, tuple)) and len(t) >= 3:
+                        transparent = (int(t[0]), int(t[1]), int(t[2]))
+
+                result[name] = SpriteConfig(
+                    file=sprite_data.get('file', ''),
+                    transparent=transparent,
+                    x=sprite_data.get('x'),
+                    y=sprite_data.get('y'),
+                    width=sprite_data.get('width'),
+                    height=sprite_data.get('height'),
+                )
+
+        return result
 
     def _resolve_entity_inheritance(self, game_def: GameDefinition) -> None:
         """Resolve 'extends' inheritance for entity types."""
@@ -1145,6 +1413,7 @@ class GameEngine(BaseGame):
                 behaviors=behaviors,
                 behavior_config=behavior_config,
                 properties=properties or {},
+                tags=overrides.get('tags', type_config.tags.copy()),
             )
         else:
             # Create with overrides only
@@ -1747,9 +2016,27 @@ class GameEngine(BaseGame):
         return spawned
 
     def _evaluate_property_value(self, value: Any) -> Any:
-        """Evaluate a property value - either literal or {lua: "expression"}."""
-        if isinstance(value, dict) and 'lua' in value:
-            return self._behavior_engine.evaluate_expression(value['lua'])
+        """Evaluate a property value.
+
+        Supported value formats:
+        - Literal: 100, "red", [1, 2, 3]
+        - Lua expression: {lua: "ams.random_range(-60, -120)"}
+        - Generator call: {call: "grid_position", args: {row: 1, col: 5}}
+
+        Generator scripts live in ams/behaviors/generators/ and expose a
+        generate(args) function that returns the computed value.
+        """
+        if isinstance(value, dict):
+            if 'lua' in value:
+                return self._behavior_engine.evaluate_expression(value['lua'])
+            elif 'call' in value:
+                script_name = value['call']
+                args = value.get('args', {})
+                # Recursively evaluate args (they may also contain {lua:...})
+                evaluated_args = {}
+                for k, v in args.items():
+                    evaluated_args[k] = self._evaluate_property_value(v)
+                return self._behavior_engine.call_generator(script_name, evaluated_args)
         return value
 
     def lose_life(self) -> None:

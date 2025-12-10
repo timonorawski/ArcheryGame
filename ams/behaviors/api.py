@@ -190,9 +190,19 @@ class LuaAPI:
         return [e.id for e in self._engine.entities.values()
                 if e.entity_type == entity_type and e.alive]
 
+    def get_entities_by_tag(self, tag: str) -> list[str]:
+        """Get IDs of all entities with a given tag."""
+        return [e.id for e in self._engine.entities.values()
+                if tag in e.tags and e.alive]
+
     def get_all_entity_ids(self) -> list[str]:
         """Get IDs of all alive entities."""
         return [e.id for e in self._engine.entities.values() if e.alive]
+
+    def count_entities_by_tag(self, tag: str) -> int:
+        """Count alive entities with a given tag."""
+        return sum(1 for e in self._engine.entities.values()
+                   if tag in e.tags and e.alive)
 
     # =========================================================================
     # Game State

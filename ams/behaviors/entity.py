@@ -51,6 +51,9 @@ class Entity:
     # Behavior-specific config (from YAML)
     behavior_config: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    # Tags for categorization (e.g., ["enemy", "brick"])
+    tags: list[str] = field(default_factory=list)
+
     def get_rect(self) -> tuple[float, float, float, float]:
         """Return (x, y, width, height) for collision detection."""
         return (self.x, self.y, self.width, self.height)
