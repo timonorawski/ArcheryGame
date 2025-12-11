@@ -499,6 +499,7 @@ player:
 # This creates the classic 5-row brick layout
 
 default_layout:
+  name: "Classic Layout"
   ball_spawn: [392, 525]
   brick_grid:
     start_x: 65
