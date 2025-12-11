@@ -1,17 +1,26 @@
 # Game Engine Extraction Refactor
 
+**Status: COMPLETE** (commit 61ea1b7)
+
 ## Goal
 
 Restructure the codebase to:
 1. Move game engine from `games/common/` to `ams/games/`
 2. Extract generalizable Lua engine from `ams/behaviors/` to `ams/lua/`
 3. Keep Lua assets (behaviors, collision_actions, generators) as game_engine core assets
+4. Split Entity into ABC (reusable) and GameEntity (game-specific)
 
-## Target Structure
+## Final Structure
 
 ```
 ams/
-├── games/                          # NEW - from games/common/
+├── lua/                            # Core Lua sandbox (REUSABLE)
+│   ├── __init__.py
+│   ├── engine.py                   # LuaEngine (accepts api_class parameter)
+│   ├── entity.py                   # Entity ABC (id, type, properties, behaviors)
+│   └── api.py                      # LuaAPIBase (property access, math, logging)
+│
+├── games/                          # Game infrastructure (from games/common/)
 │   ├── __init__.py
 │   ├── base_game.py                # Base class for all games
 │   ├── game_state.py               # GameState enum
@@ -30,19 +39,14 @@ ams/
 │   │       └── mouse.py
 │   └── game_engine/                # YAML-driven game framework
 │       ├── __init__.py
-│       ├── engine.py               # Main GameEngine class (from game_engine.py)
-│       └── lua/                    # Lua behavior system (game-engine specific)
+│       ├── engine.py               # GameEngine (uses LuaEngine + GameLuaAPI)
+│       ├── entity.py               # GameEntity(Entity) - transform, physics, visuals
+│       ├── api.py                  # GameLuaAPI(LuaAPIBase) - game-specific methods
+│       └── lua/                    # Lua assets
 │           ├── __init__.py
-│           ├── entity.py           # Entity class
-│           ├── api.py              # LuaAPI (ams.* namespace)
 │           ├── behaviors/          # .lua entity behaviors
 │           ├── collision_actions/  # .lua collision handlers
 │           └── generators/         # .lua property generators
-│
-├── lua/                            # Core Lua sandbox abstraction (reusable)
-│   ├── __init__.py
-│   └── engine.py                   # LuaEngine (renamed from BehaviorEngine)
-│                                   # Sandboxed Lua runtime with entity/behavior mgmt
 │
 ├── input_actions/                  # Keep here (game engine uses via ContentFS)
 │   └── *.lua
@@ -51,46 +55,54 @@ ams/
 └── ...
 ```
 
-## Current → New Path Mapping
+## Actual Path Mapping
 
-| Current Path | New Path |
-|--------------|----------|
-| `games/common/game_engine.py` | `ams/games/game_engine/engine.py` |
-| `games/common/base_game.py` | `ams/games/base_game.py` |
-| `games/common/game_state.py` | `ams/games/game_state.py` |
-| `games/common/levels.py` | `ams/games/levels.py` |
-| `games/common/level_chooser.py` | `ams/games/level_chooser.py` |
-| `games/common/pacing.py` | `ams/games/pacing.py` |
-| `games/common/palette.py` | `ams/games/palette.py` |
-| `games/common/quiver.py` | `ams/games/quiver.py` |
-| `games/common/input/` | `ams/games/input/` |
-| `ams/behaviors/engine.py` | `ams/lua/engine.py` (rename to LuaEngine) |
-| `ams/behaviors/entity.py` | `ams/games/game_engine/lua/entity.py` |
-| `ams/behaviors/api.py` | `ams/games/game_engine/lua/api.py` |
-| `ams/behaviors/lua/` | `ams/games/game_engine/lua/behaviors/` |
-| `ams/behaviors/collision_actions/` | `ams/games/game_engine/lua/collision_actions/` |
-| `ams/behaviors/generators/` | `ams/games/game_engine/lua/generators/` |
+| Original Path | Final Path | Notes |
+|--------------|----------|-------|
+| `games/common/game_engine.py` | `ams/games/game_engine/engine.py` | GameEngine class |
+| `games/common/base_game.py` | `ams/games/base_game.py` | |
+| `games/common/game_state.py` | `ams/games/game_state.py` | |
+| `games/common/levels.py` | `ams/games/levels.py` | |
+| `games/common/level_chooser.py` | `ams/games/level_chooser.py` | |
+| `games/common/pacing.py` | `ams/games/pacing.py` | |
+| `games/common/palette.py` | `ams/games/palette.py` | |
+| `games/common/quiver.py` | `ams/games/quiver.py` | |
+| `games/common/input/` | `ams/games/input/` | |
+| `ams/behaviors/engine.py` | `ams/lua/engine.py` | Renamed BehaviorEngine → LuaEngine |
+| `ams/behaviors/entity.py` | `ams/lua/entity.py` | Became Entity ABC |
+| (new) | `ams/games/game_engine/entity.py` | GameEntity(Entity) concrete class |
+| `ams/behaviors/api.py` | `ams/lua/api.py` | Became LuaAPIBase (minimal) |
+| (new) | `ams/games/game_engine/api.py` | GameLuaAPI(LuaAPIBase) game methods |
+| `ams/behaviors/lua/` | `ams/games/game_engine/lua/behaviors/` | |
+| `ams/behaviors/collision_actions/` | `ams/games/game_engine/lua/collision_actions/` | |
+| `ams/behaviors/generators/` | `ams/games/game_engine/lua/generators/` | |
 
-## Import Updates Required
+## Import Updates (Completed)
 
-### Old → New Import Mapping
+### Key Import Changes
 
 | Old Import | New Import |
 |------------|------------|
 | `from games.common import GameState` | `from ams.games import GameState` |
 | `from games.common import BaseGame` | `from ams.games import BaseGame` |
 | `from games.common import GameEngine` | `from ams.games.game_engine import GameEngine` |
-| `from games.common.base_game import BaseGame` | `from ams.games.base_game import BaseGame` |
-| `from games.common.game_state import GameState` | `from ams.games.game_state import GameState` |
-| `from games.common.game_engine import GameEngine` | `from ams.games.game_engine import GameEngine` |
-| `from games.common.palette import GamePalette` | `from ams.games.palette import GamePalette` |
-| `from games.common.pacing import scale_for_pacing` | `from ams.games.pacing import scale_for_pacing` |
-| `from games.common.levels import SimpleLevelLoader` | `from ams.games.levels import SimpleLevelLoader` |
 | `from games.common.input import InputEvent, InputManager` | `from ams.games.input import InputEvent, InputManager` |
-| `from games.common.input.sources import InputSource, MouseInputSource` | `from ams.games.input.sources import InputSource, MouseInputSource` |
-| `from ams.behaviors import BehaviorEngine, Entity` | `from ams.lua import LuaEngine` + `from ams.games.game_engine.lua import Entity` |
 | `from ams.behaviors.engine import BehaviorEngine` | `from ams.lua.engine import LuaEngine` |
-| `from ams.behaviors.api import _to_lua_value` | `from ams.games.game_engine.lua.api import _to_lua_value` |
+| `from ams.behaviors.api import _to_lua_value` | `from ams.lua.api import _to_lua_value` |
+
+### New Classes
+
+| Class | Location | Purpose |
+|-------|----------|---------|
+| `Entity` | `ams.lua.entity` | ABC - minimal contract (id, type, properties, behaviors) |
+| `GameEntity` | `ams.games.game_engine.entity` | Concrete entity with transform, physics, visuals |
+| `LuaAPIBase` | `ams.lua.api` | Base API (property access, math, logging) |
+| `GameLuaAPI` | `ams.games.game_engine.api` | Game-specific API (position, velocity, spawn, etc.) |
+| `LuaEngine` | `ams.lua.engine` | Core Lua sandbox, accepts `api_class` parameter |
+
+### Backward Compatibility
+
+`games/common/__init__.py` re-exports from `ams.games` for legacy imports.
 
 ### Files Requiring Import Updates (~25 files)
 
@@ -244,12 +256,38 @@ python dev_game.py duckhunt                  # Python game
 | `ams/games/game_engine/__init__.py` | Export GameEngine, GameEngineSkin, etc. |
 | `ams/games/game_engine/lua/__init__.py` | Export Entity, LuaAPI |
 
-## Verification
+## Verification (PASSED)
 
-After refactor, these commands should work:
+All tests pass and games work:
 ```bash
-python dev_game.py --list                    # List all games
-python dev_game.py sweetphysicsng            # YAML-driven game
-python dev_game.py duckhunt                  # Python game
-pytest tests/test_lua_sandbox.py -v          # All 105 tests pass
+pytest tests/test_lua_sandbox.py -v          # ✓ 105 passed
+python dev_game.py --list                    # ✓ 17 games listed
+python dev_game.py sweetphysicsng            # ✓ YAML-driven game works
+python dev_game.py duckhunt                  # ✓ Python game works
 ```
+
+## Implementation Notes
+
+### Entity ABC Split
+
+The original plan had Entity in `ams/games/game_engine/lua/`. During implementation,
+we recognized that Entity is a generic mapper for Lua behaviors, not game-specific.
+
+Final design:
+- `Entity` ABC in `ams/lua/` - defines minimal contract for behavior attachment
+- `GameEntity(Entity)` in `ams/games/game_engine/` - adds game-specific fields
+
+### API Split
+
+Similarly, the Lua API was split:
+- `LuaAPIBase` in `ams/lua/api.py` - property access, math helpers, logging
+- `GameLuaAPI(LuaAPIBase)` in `ams/games/game_engine/api.py` - game operations
+
+`LuaEngine` accepts an `api_class` parameter (defaults to `LuaAPIBase`).
+`GameEngine` passes `GameLuaAPI` for full game functionality.
+
+### Circular Import Resolution
+
+Avoided circular imports by:
+1. Lazy importing `GameEntity` in `LuaEngine.create_entity()`
+2. Direct module imports instead of through `__init__.py` where needed
