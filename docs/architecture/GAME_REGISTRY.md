@@ -316,7 +316,7 @@ def from_yaml(cls, yaml_path: Path) -> Type['GameEngine']:
             super().__init__(content_fs, skin='default', **kwargs)
 
         def _get_skin(self, skin_name):
-            return GameEngineSkin()
+            return GameEngineRenderer()
 
     return YAMLGameMode
 ```
@@ -326,7 +326,7 @@ def from_yaml(cls, yaml_path: Path) -> Type['GameEngine']:
 Assets are resolved through ContentFS, enabling user overrides:
 
 ```python
-# In GameEngineSkin._load_sprite():
+# In GameEngineRenderer._load_sprite():
 if self._content_fs:
     # Resolve through layered filesystem
     real_path = self._content_fs.getsyspath(
@@ -465,7 +465,7 @@ python ams_game.py --list-games
 | `GameRegistry` | `games/registry.py` | Game discovery and creation |
 | `GameInfo` | `games/registry.py` | Game metadata container |
 | `GameEngine` | `games/common/game_engine.py` | YAML-driven game runtime |
-| `GameEngineSkin` | `games/common/game_engine.py` | Rendering abstraction |
+| `GameEngineRenderer` | `games/common/game_engine.py` | Rendering abstraction |
 | `BehaviorEngine` | `ams/behaviors/engine.py` | Lua behavior execution |
 | `BaseGame` | `games/common/base_game.py` | Abstract game base class |
 

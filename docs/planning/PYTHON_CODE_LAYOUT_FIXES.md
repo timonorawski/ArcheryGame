@@ -210,7 +210,7 @@ The game engine's `GameEngine` class uses `LuaEngine` and adds Entity/API/behavi
 2. `ams/games/__init__.py` - export GameState, BaseGame, etc.
 3. `ams/games/input/__init__.py` - export InputEvent, InputManager
 4. `ams/games/input/sources/__init__.py` - export InputSource, MouseInputSource
-5. `ams/games/game_engine/__init__.py` - export GameEngine, GameEngineSkin
+5. `ams/games/game_engine/__init__.py` - export GameEngine, GameEngineRenderer
 6. `ams/games/game_engine/lua/__init__.py` - export Entity, LuaAPI
 
 ### Phase 7: Update Internal Imports
@@ -253,7 +253,7 @@ python dev_game.py duckhunt                  # Python game
 | `ams/games/__init__.py` | Export GameState, BaseGame, pacing, palette, quiver, levels |
 | `ams/games/input/__init__.py` | Export InputEvent, InputManager |
 | `ams/games/input/sources/__init__.py` | Export InputSource, MouseInputSource |
-| `ams/games/game_engine/__init__.py` | Export GameEngine, GameEngineSkin, etc. |
+| `ams/games/game_engine/__init__.py` | Export GameEngine, GameEngineRenderer, etc. |
 | `ams/games/game_engine/lua/__init__.py` | Export Entity, LuaAPI |
 
 ## Verification (PASSED)

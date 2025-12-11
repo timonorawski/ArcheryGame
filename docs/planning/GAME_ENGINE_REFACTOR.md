@@ -247,7 +247,7 @@ class BrickBreakerNGMode(GameEngine):
         {'name': '--lives', 'type': int, 'default': 3, 'help': 'Starting lives'},
     ]
 
-    def _get_skin(self, skin_name: str) -> GameEngineSkin:
+    def _get_skin(self, skin_name: str) -> GameEngineRenderer:
         return BrickBreakerNGSkin()
 
     def _create_level_loader(self) -> NGLevelLoader:

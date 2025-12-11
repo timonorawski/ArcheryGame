@@ -35,7 +35,7 @@ The AMS Game Engine enables fully data-driven arcade games. Games are defined by
 A fully data-driven game mode is just a YAML loader shim:
 
 ```python
-class BrickBreakerNGSkin(GameEngineSkin):
+class BrickBreakerNGSkin(GameEngineRenderer):
     """All rendering is YAML-driven via game.yaml render commands."""
     pass  # All rendering handled by base class
 
@@ -49,7 +49,7 @@ class BrickBreakerNGMode(GameEngine):
     GAME_DEF_FILE = Path(__file__).parent / 'game.yaml'
     LEVELS_DIR = Path(__file__).parent / 'levels'
 
-    def _get_skin(self, _skin_name: str) -> GameEngineSkin:
+    def _get_skin(self, _skin_name: str) -> GameEngineRenderer:
         return BrickBreakerNGSkin()
 
     def _create_level_loader(self) -> NGLevelLoader:
@@ -1438,10 +1438,10 @@ return hit_player
 
 ## Skins
 
-Skins provide visual representation. The base `GameEngineSkin` handles all rendering via YAML render commands.
+Skins provide visual representation. The base `GameEngineRenderer` handles all rendering via YAML render commands.
 
 ```python
-class GameEngineSkin:
+class GameEngineRenderer:
     def render_entity(self, entity: Entity, screen) -> None:
         """Render entity using YAML render commands."""
         # Looks up render commands from game definition
@@ -1460,7 +1460,7 @@ class GameEngineSkin:
 For fully data-driven games, the skin can be an empty subclass:
 
 ```python
-class BrickBreakerNGSkin(GameEngineSkin):
+class BrickBreakerNGSkin(GameEngineRenderer):
     pass  # All rendering handled by base class via game.yaml
 ```
 
@@ -1472,7 +1472,7 @@ class BrickBreakerNGSkin(GameEngineSkin):
 4. Create `games/MyGame/game_mode.py`:
 
 ```python
-from games.common.game_engine import GameEngine, GameEngineSkin
+from ams.games.game_engine import GameEngine, GameEngineRenderer
 from pathlib import Path
 import yaml
 
@@ -1491,7 +1491,7 @@ def _load_game_metadata():
 _GAME_META = _load_game_metadata()
 
 
-class MyGameSkin(GameEngineSkin):
+class MyGameSkin(GameEngineRenderer):
     pass  # YAML-driven rendering
 
 
@@ -1504,7 +1504,7 @@ class MyGameMode(GameEngine):
     GAME_DEF_FILE = Path(__file__).parent / 'game.yaml'
     LEVELS_DIR = Path(__file__).parent / 'levels'
 
-    def _get_skin(self, skin_name: str) -> GameEngineSkin:
+    def _get_skin(self, skin_name: str) -> GameEngineRenderer:
         return MyGameSkin()
 ```
 
