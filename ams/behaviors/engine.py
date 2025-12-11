@@ -26,6 +26,38 @@ from .entity import Entity
 from .api import LuaAPI
 
 
+def _lua_attribute_filter(obj, attr_name, is_setting):
+    """Attribute filter for Lua sandbox.
+
+    Blocks access to:
+    - Dunder attributes (__class__, __dict__, __module__, etc.)
+    - Private attributes (_internal, _cache, etc.)
+    - Callable attributes (methods) on Python objects
+
+    This prevents Lua from accessing Python internals or calling methods
+    on Python objects that might leak through. Note: This filter only applies
+    to Python objects accessed from Lua, not to Lua tables like `ams.*`.
+    """
+    if attr_name.startswith('__'):
+        raise AttributeError(f'Access to {attr_name} is blocked')
+    if attr_name.startswith('_'):
+        raise AttributeError(f'Access to private attribute {attr_name} is blocked')
+
+    # Block callable attributes (methods) on Python objects
+    # This prevents calling methods on objects that might leak through
+    if not is_setting:
+        try:
+            attr = getattr(obj, attr_name, None)
+            if attr is not None and callable(attr) and not isinstance(attr, type):
+                raise AttributeError(f'Access to callable {attr_name} is blocked')
+        except AttributeError:
+            raise
+        except Exception:
+            pass  # If we can't check, allow the access
+
+    return attr_name
+
+
 class ScheduledCallback:
     """A callback scheduled to run after a delay."""
     def __init__(self, time_remaining: float, callback_name: str, entity_id: str):
@@ -88,20 +120,150 @@ class BehaviorEngine:
         # Signature: (entity_type, x, y, vx, vy, width, height, color, sprite) -> Entity
         self._spawn_callback: Optional[Callable] = None
 
-        # Initialize Lua
-        self._lua = LuaRuntime(unpack_returned_tuples=True)
+        # Initialize Lua with sandbox protections:
+        # - register_eval=False: don't expose python.eval()
+        # - register_builtins=False: don't expose python.builtins.*
+        # - attribute_filter: blocks access to __dunder__ and _private attrs
+        # - unpack_returned_tuples: convenience for multi-return values
+        # Note: We also clear all globals including 'python' in _setup_lua_environment,
+        # but these options provide defense in depth.
+        self._lua = LuaRuntime(
+            register_eval=False,
+            register_builtins=False,
+            unpack_returned_tuples=True,
+            attribute_filter=_lua_attribute_filter
+        )
         self._api = LuaAPI(self)
+        self._api.set_lua_runtime(self._lua)  # Enable Lua-safe return value conversion
         self._setup_lua_environment()
 
     def set_spawn_callback(self, callback: Callable) -> None:
         """Set callback for entity spawning (used by GameEngine to apply type config)."""
         self._spawn_callback = callback
 
+    def _validate_sandbox(self) -> None:
+        """Validate that the Lua sandbox is properly locked down.
+
+        This runs after sandbox setup to catch any regressions. If validation
+        fails, it raises RuntimeError to prevent running with a compromised sandbox.
+        """
+        critical_escapes = [
+            # Lupa-injected (most dangerous)
+            ('python', 'python bridge gives full interpreter access'),
+            ('_python', 'alternate python accessor'),
+            # LuaJIT specific
+            ('ffi', 'FFI gives raw memory access'),
+            ('jit', 'JIT library'),
+            # Code loading
+            ('load', 'can compile arbitrary bytecode'),
+            ('loadstring', 'same as load'),
+            ('loadfile', 'load from filesystem'),
+            ('dofile', 'execute from filesystem'),
+            # Module system
+            ('require', 'module loader'),
+            ('package', 'package system'),
+            ('module', 'legacy module creation'),
+            # Debug/introspection
+            ('debug', 'full introspection'),
+            ('getfenv', 'environment access'),
+            ('setfenv', 'environment manipulation'),
+            ('getmetatable', 'metatable access'),
+            ('setmetatable', 'metatable manipulation'),
+            # Raw table access (metatable bypass)
+            ('rawget', 'bypass __index'),
+            ('rawset', 'bypass __newindex'),
+            ('rawequal', 'bypass __eq'),
+            ('rawlen', 'bypass __len'),
+            # Misc dangerous
+            ('_G', 'global table reference'),
+            ('collectgarbage', 'GC manipulation'),
+            ('newproxy', 'userdata creation'),
+            # Libraries
+            ('io', 'filesystem access'),
+            ('os', 'OS interface'),
+            ('coroutine', 'coroutines'),
+        ]
+
+        failures = []
+        for name, risk in critical_escapes:
+            try:
+                result = self._lua.eval(f'{name} ~= nil')
+                if result:
+                    failures.append(f'EXPOSED: {name} - {risk}')
+            except Exception:
+                pass  # eval failed = not accessible = good
+
+        # Check string.dump via method syntax
+        try:
+            result = self._lua.eval('("").dump')
+            if result is not None:
+                failures.append('EXPOSED: string.dump accessible via method syntax')
+        except Exception:
+            pass
+
+        # Verify ams namespace exists (sanity check)
+        try:
+            result = self._lua.eval('ams ~= nil')
+            if not result:
+                failures.append('ERROR: ams namespace missing - sandbox broken')
+        except Exception as e:
+            failures.append(f'ERROR: cannot verify ams namespace: {e}')
+
+        if failures:
+            for f in failures:
+                print(f'[BehaviorEngine] SANDBOX FAILURE: {f}')
+            raise RuntimeError(
+                f'Lua sandbox validation failed with {len(failures)} issue(s). '
+                'This is a security risk - refusing to continue.'
+            )
+
     def _setup_lua_environment(self) -> None:
-        """Set up the Lua environment with API functions."""
+        """Set up the Lua environment with sandboxed API functions.
+
+        Security model: Opt-in globals only. We clear all default Lua globals
+        and expose only the safe subset needed for game behaviors. This prevents
+        access to io, os, debug, loadfile, require, package, and the python bridge.
+        """
         g = self._lua.globals()
 
-        # Create 'ams' namespace for API
+        # Save safe primitives before nuking globals
+        # These are needed for basic Lua operations in behavior scripts
+        safe_globals = {
+            'pairs': g.pairs,        # Iterate tables
+            'ipairs': g.ipairs,      # Iterate arrays
+            'type': g.type,          # Type checking
+            'tostring': g.tostring,  # String conversion
+            'tonumber': g.tonumber,  # Number conversion
+            'select': g.select,      # Vararg handling
+            'unpack': g.table.unpack if hasattr(g.table, 'unpack') else g.unpack,  # Table unpacking
+            'pcall': g.pcall,        # Protected calls (error handling)
+            'error': g.error,        # Raise errors
+            'next': g.next,          # Table iteration primitive
+            'math': g.math,          # Math library (we'll override specific functions)
+            # Note: string library omitted - behaviors don't need string manipulation
+            # Note: table library omitted - basic table ops work without it
+        }
+
+        # Remove dangerous functions from string metatable BEFORE clearing globals
+        # string.dump can serialize functions to bytecode - security risk
+        # We need getmetatable which will be cleared shortly
+        self._lua.execute("""
+            local mt = getmetatable("")
+            if mt and mt.__index then
+                mt.__index.dump = nil  -- Remove string.dump
+                mt.__index.rep = nil   -- Remove string.rep (Memory DoS risk)
+            end
+        """)
+
+        # Nuclear option: clear ALL globals
+        for key in list(g.keys()):
+            g[key] = None
+
+        # Reinstall only safe globals
+        for key, value in safe_globals.items():
+            g[key] = value
+
+        # Create 'ams' namespace for our API
         self._lua.execute("ams = {}")
         ams = g.ams
 
@@ -154,6 +316,9 @@ class BehaviorEngine:
         ams.clamp = api.math_clamp
 
         ams.log = api.log
+
+        # Validate sandbox is properly locked down
+        self._validate_sandbox()
 
     def load_behavior(self, name: str, path: Optional[Path] = None) -> bool:
         """

@@ -9,8 +9,10 @@ The API is designed to be:
 - Sufficient: Core behaviors can be fully implemented
 - Safe: No filesystem, network, or OS access
 - Symmetric: Same API on native and WASM (future)
+- Lua-native returns: All return values are primitives or Lua tables (not Python objects)
 """
 
+from functools import wraps
 from typing import Callable, Any, TYPE_CHECKING
 import math
 import random
@@ -19,16 +21,92 @@ if TYPE_CHECKING:
     from .engine import BehaviorEngine
 
 
+def _to_lua_value(value: Any, lua_runtime) -> Any:
+    """Convert a Python value to a Lua-safe value.
+
+    Safe values:
+    - Primitives: None, bool, int, float, str
+    - Lua tables: Created via lua.table() for lists/dicts
+
+    This ensures Lua code never receives raw Python objects (lists, dicts, etc.)
+    which have different semantics (0-indexed, no ipairs/pairs support, no # operator).
+    """
+    if value is None:
+        return None
+    if isinstance(value, (bool, int, float, str)):
+        return value
+
+    if isinstance(value, (list, tuple)):
+        # Convert to 1-indexed Lua table
+        lua_table = lua_runtime.table()
+        for i, item in enumerate(value, start=1):
+            lua_table[i] = _to_lua_value(item, lua_runtime)
+        return lua_table
+
+    if isinstance(value, dict):
+        # Convert to Lua table with string keys
+        lua_table = lua_runtime.table()
+        for k, v in value.items():
+            if not isinstance(k, (str, int, float, bool)):
+                raise TypeError(
+                    f"Dict key must be str/int/float, got {type(k).__name__}"
+                )
+            lua_table[k] = _to_lua_value(v, lua_runtime)
+        return lua_table
+    
+    # bytes - reject, we don't want "b'...'" strings to sneak through
+    if isinstance(value, bytes):
+        raise TypeError("Cannot pass bytes to Lua - decode to str first")
+
+    # sets - reject, not predictable order
+    if isinstance(value, set):
+        # Reject (sets are unordered, might surprise Lua authors)
+        raise TypeError("Cannot convert set to Lua - convert to list first")
+
+    # For other objects, fail loudly - this is a bug in the API implementation
+    # This prevents leaking arbitrary Python objects
+    raise TypeError(
+        f"Cannot convert {type(value).__name__} to Lua-safe value. "
+        f"API methods must return only primitives, lists, or dicts."
+    )
+
+
+def lua_safe_return(method: Callable) -> Callable:
+    """Decorator that converts return values to Lua-safe types.
+
+    Wraps methods on LuaAPI to ensure they only return:
+    - Primitives (None, bool, int, float, str)
+    - Lua-native tables (for lists/dicts)
+
+    This prevents Lua from receiving raw Python objects which have
+    different semantics (0-indexed lists, no ipairs support, etc.).
+    """
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        result = method(self, *args, **kwargs)
+        return _to_lua_value(result, self._lua)
+    return wrapper
+
+
 class LuaAPI:
     """
     API exposed to Lua behaviors.
 
     All methods here are callable from Lua. They operate on entities
     by ID, not direct reference, to maintain the sandbox boundary.
+
+    Methods that return collections use @lua_safe_return to convert
+    Python lists/dicts to Lua-native tables, ensuring proper 1-indexed
+    iteration with ipairs/pairs and # operator support.
     """
 
     def __init__(self, engine: 'BehaviorEngine'):
         self._engine = engine
+        self._lua = None  # Set by BehaviorEngine after init
+
+    def set_lua_runtime(self, lua) -> None:
+        """Set the Lua runtime reference for converting return values."""
+        self._lua = lua
 
     # =========================================================================
     # Entity Access
@@ -136,8 +214,12 @@ class LuaAPI:
     # Properties (custom key-value storage for behaviors)
     # =========================================================================
 
+    @lua_safe_return
     def get_prop(self, entity_id: str, key: str) -> Any:
-        """Get custom property from entity."""
+        """Get custom property from entity.
+
+        Returns Lua-safe values (primitives or Lua tables).
+        """
         entity = self._engine.get_entity(entity_id)
         if entity:
             return entity.properties.get(key)
@@ -153,8 +235,13 @@ class LuaAPI:
     # Behavior Config (read-only, from YAML)
     # =========================================================================
 
+    @lua_safe_return
     def get_config(self, entity_id: str, behavior_name: str, key: str, default: Any = None) -> Any:
-        """Get behavior config value from YAML definition."""
+        """Get behavior config value from YAML definition.
+
+        Returns Lua-safe values (primitives or Lua tables).
+        Nested dicts/lists from YAML are converted to Lua tables.
+        """
         entity = self._engine.get_entity(entity_id)
         if entity and behavior_name in entity.behavior_config:
             return entity.behavior_config[behavior_name].get(key, default)
@@ -185,18 +272,30 @@ class LuaAPI:
     # Entity Queries
     # =========================================================================
 
+    @lua_safe_return
     def get_entities_of_type(self, entity_type: str) -> list[str]:
-        """Get IDs of all entities of a given type."""
+        """Get IDs of all entities of a given type.
+
+        Returns a 1-indexed Lua table, suitable for ipairs iteration.
+        """
         return [e.id for e in self._engine.entities.values()
                 if e.entity_type == entity_type and e.alive]
 
+    @lua_safe_return
     def get_entities_by_tag(self, tag: str) -> list[str]:
-        """Get IDs of all entities with a given tag."""
+        """Get IDs of all entities with a given tag.
+
+        Returns a 1-indexed Lua table, suitable for ipairs iteration.
+        """
         return [e.id for e in self._engine.entities.values()
                 if tag in e.tags and e.alive]
 
+    @lua_safe_return
     def get_all_entity_ids(self) -> list[str]:
-        """Get IDs of all alive entities."""
+        """Get IDs of all alive entities.
+
+        Returns a 1-indexed Lua table, suitable for ipairs iteration.
+        """
         return [e.id for e in self._engine.entities.values() if e.alive]
 
     def count_entities_by_tag(self, tag: str) -> int:
