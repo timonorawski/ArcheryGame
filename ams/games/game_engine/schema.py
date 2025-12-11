@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 
 _game_schema: Optional[Dict[str, Any]] = None
-_SCHEMAS_DIR = Path(__file__).parent.parent.parent / 'schemas'
+_SCHEMAS_DIR = Path(__file__).parent / 'schemas'
 
 # Set AMS_SKIP_SCHEMA_VALIDATION=1 to disable strict validation
 _SKIP_VALIDATION = os.environ.get('AMS_SKIP_SCHEMA_VALIDATION', '').lower() in ('1', 'true', 'yes')
