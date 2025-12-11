@@ -112,6 +112,10 @@
         "$ref": "#/$defs/input_mapping"
       }
     },
+    "global_on_input": {
+      "$ref": "#/$defs/input_action",
+      "description": "Action to execute on any input (plays sound on click, etc.)"
+    },
     "lose_conditions": {
       "type": "array",
       "description": "Events that cause life loss",
@@ -704,6 +708,24 @@
         "when": {
           "$ref": "#/$defs/when_condition",
           "description": "Condition for triggering"
+        },
+        "action": {
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "Built-in action name (e.g., 'play_sound') or Lua script name"
+            },
+            {
+              "$ref": "#/$defs/lua_behavior",
+              "description": "Inline Lua action code"
+            }
+          ],
+          "description": "Action to execute: 'play_sound', Lua script name, or inline Lua"
+        },
+        "action_args": {
+          "type": "object",
+          "description": "Arguments for the action",
+          "additionalProperties": true
         }
       },
       "additionalProperties": false

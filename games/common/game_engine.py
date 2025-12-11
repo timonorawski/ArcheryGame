@@ -250,6 +250,8 @@ class InputAction:
     """Action to take on input for an entity type."""
     transform: Optional[TransformConfig] = None  # Transform on input
     when: Optional[WhenCondition] = None  # Condition for triggering
+    action: Optional[str] = None  # Action name (e.g., "play_sound")
+    action_args: Dict[str, Any] = field(default_factory=dict)  # Action arguments
 
 
 @dataclass
@@ -405,6 +407,9 @@ class GameDefinition:
     # Input mapping - how input affects entity types
     # Format: input_mapping[entity_type] = InputMappingConfig
     input_mapping: Dict[str, InputMappingConfig] = field(default_factory=dict)
+
+    # Global input action - fires on any input regardless of entity
+    global_on_input: Optional[InputAction] = None
 
     # Lose conditions - events that cause life loss
     lose_conditions: List[LoseConditionConfig] = field(default_factory=list)
@@ -985,6 +990,7 @@ class GameEngine(BaseGame):
         # Counters for generating unique inline names
         self._inline_behavior_counter = 0
         self._inline_collision_action_counter = 0
+        self._inline_input_action_counter = 0
 
         # Create behavior engine
         self._behavior_engine = BehaviorEngine(
@@ -1183,45 +1189,22 @@ class GameEngine(BaseGame):
         #       when:
         #         property: ball_launched
         #         value: false
+        # Parse global on_input (fires on any input regardless of entity)
+        global_on_input_data = data.get('global_on_input')
+        if global_on_input_data:
+            game_def.global_on_input = self._parse_input_action(global_on_input_data)
+
         raw_input_mapping = data.get('input_mapping', {})
         for entity_type, mapping_data in raw_input_mapping.items():
             on_input = None
             on_hit = None
 
             if 'on_input' in mapping_data:
-                on_input_data = mapping_data['on_input']
-                transform_config = None
-                when_condition = None
-
-                # Parse transform
-                if 'transform' in on_input_data:
-                    transform_config = self._parse_transform_config(on_input_data['transform'])
-
-                # Parse when condition
-                if 'when' in on_input_data:
-                    when_condition = self._parse_when_condition(on_input_data['when'])
-
-                on_input = InputAction(
-                    transform=transform_config,
-                    when=when_condition,
-                )
+                on_input = self._parse_input_action(mapping_data['on_input'])
 
             # Parse on_hit (input must be inside entity bounds)
             if 'on_hit' in mapping_data:
-                on_hit_data = mapping_data['on_hit']
-                transform_config = None
-                when_condition = None
-
-                if 'transform' in on_hit_data:
-                    transform_config = self._parse_transform_config(on_hit_data['transform'])
-
-                if 'when' in on_hit_data:
-                    when_condition = self._parse_when_condition(on_hit_data['when'])
-
-                on_hit = InputAction(
-                    transform=transform_config,
-                    when=when_condition,
-                )
+                on_hit = self._parse_input_action(mapping_data['on_hit'])
 
             game_def.input_mapping[entity_type] = InputMappingConfig(
                 target_x=mapping_data.get('target_x'),
@@ -1395,6 +1378,47 @@ class GameEngine(BaseGame):
                     return ''
 
         return ''
+
+    def _parse_input_action(self, data: Dict[str, Any]) -> InputAction:
+        """Parse an input action from YAML.
+
+        Action can be:
+        - String: Built-in action name (e.g., 'play_sound') or Lua script name
+        - Dict with 'lua' key: Inline Lua code
+        """
+        transform_config = None
+        when_condition = None
+        action_name = None
+
+        if 'transform' in data:
+            transform_config = self._parse_transform_config(data['transform'])
+
+        if 'when' in data:
+            when_condition = self._parse_when_condition(data['when'])
+
+        # Handle action - can be string or inline Lua
+        action_data = data.get('action')
+        if action_data:
+            if isinstance(action_data, str):
+                # File reference or built-in action
+                action_name = action_data
+            elif isinstance(action_data, dict) and 'lua' in action_data:
+                # Inline Lua code - register it and use generated name
+                lua_code = action_data['lua']
+                self._inline_input_action_counter += 1
+                name = f'_inline_input_action_{self._inline_input_action_counter}'
+
+                if self._behavior_engine.load_inline_input_action(name, lua_code):
+                    action_name = name
+                else:
+                    print(f"[GameEngine] Failed to load inline input action")
+
+        return InputAction(
+            transform=transform_config,
+            when=when_condition,
+            action=action_name,
+            action_args=data.get('action_args', {}),
+        )
 
     def _parse_transform_config(self, data: Dict[str, Any]) -> TransformConfig:
         """Parse a transform config from YAML."""
@@ -1834,7 +1858,16 @@ class GameEngine(BaseGame):
 
     def _apply_input_mapping(self, event: InputEvent) -> None:
         """Apply input mapping from game.yaml to entities."""
-        if not self._game_def or not self._game_def.input_mapping:
+        if not self._game_def:
+            return
+
+        input_x, input_y = event.position.x, event.position.y
+
+        # Handle global on_input action (e.g., play shot sound)
+        if self._game_def.global_on_input:
+            self._handle_input_action(None, self._game_def.global_on_input, input_x, input_y)
+
+        if not self._game_def.input_mapping:
             return
 
         for entity_type, mapping in self._game_def.input_mapping.items():
@@ -1847,36 +1880,71 @@ class GameEngine(BaseGame):
             for entity in entities:
                 # Apply target_x/target_y if configured
                 if mapping.target_x:
-                    entity.properties[mapping.target_x] = event.position.x
+                    entity.properties[mapping.target_x] = input_x
                 if mapping.target_y:
-                    entity.properties[mapping.target_y] = event.position.y
+                    entity.properties[mapping.target_y] = input_y
 
                 # Check for on_input action (fires for any input)
                 if mapping.on_input:
-                    self._handle_input_action(entity, mapping.on_input)
+                    self._handle_input_action(entity, mapping.on_input, input_x, input_y)
 
                 # Check for on_hit action (only fires if input is inside entity)
                 if mapping.on_hit:
-                    if self._point_in_entity(event.position.x, event.position.y, entity):
-                        self._handle_input_action(entity, mapping.on_hit)
+                    if self._point_in_entity(input_x, input_y, entity):
+                        self._handle_input_action(entity, mapping.on_hit, input_x, input_y)
 
     def _point_in_entity(self, x: float, y: float, entity: Entity) -> bool:
         """Check if a point is inside an entity's bounding box."""
         return (entity.x <= x <= entity.x + entity.width and
                 entity.y <= y <= entity.y + entity.height)
 
-    def _handle_input_action(self, entity: Entity, action: InputAction) -> None:
-        """Handle an input action for an entity."""
+    def _handle_input_action(
+        self,
+        entity: Optional[Entity],
+        action: InputAction,
+        input_x: float,
+        input_y: float
+    ) -> None:
+        """Handle an input action for an entity (or globally if entity is None)."""
         # Check when condition if present
-        if action.when and action.when.property:
+        if action.when and action.when.property and entity:
             prop_value = entity.properties.get(action.when.property)
             if prop_value != action.when.value:
                 # Condition not met, skip action
                 return
 
-        # Execute transform if configured
-        if action.transform:
+        # Execute named action if configured
+        if action.action:
+            self._execute_action(action.action, action.action_args, input_x, input_y)
+
+        # Execute transform if configured (requires entity)
+        if action.transform and entity:
             self.apply_transform(entity, action.transform)
+
+    def _execute_action(
+        self,
+        action_name: str,
+        args: Dict[str, Any],
+        input_x: float,
+        input_y: float
+    ) -> None:
+        """Execute a named action with arguments.
+
+        Built-in actions:
+        - play_sound: Plays a sound (args: {sound: "name"})
+
+        For any other action name, tries to execute a Lua input action script
+        from ams/input_actions/{action_name}.lua
+        """
+        # Built-in actions
+        if action_name == 'play_sound':
+            sound_name = args.get('sound', '')
+            if sound_name:
+                self._skin.play_sound(sound_name)
+            return
+
+        # Try Lua input action
+        self._behavior_engine.execute_input_action(action_name, input_x, input_y, args)
 
     def _handle_player_input(self, event: InputEvent) -> None:
         """Handle a single input event.

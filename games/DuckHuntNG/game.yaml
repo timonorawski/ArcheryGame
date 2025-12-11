@@ -32,6 +32,9 @@ win_target: 1000
 # Transparent color: [159, 227, 163] (light green background)
 
 assets:
+  sounds:
+    shot: shot.wav
+
   sprites:
     # Green duck sprites (row at y=126)
     green_right_1:
@@ -278,7 +281,7 @@ entity_types:
   # ---------------------------------------------------------------------------
   # Duck - Hit state (pause before falling)
   # ---------------------------------------------------------------------------
-  # Static, shows hit effect for 0.5 seconds, then transforms to falling.
+  # Static, shows hit sprite for 2 seconds, then transforms to falling.
 
   duck_hit:
     width: 35
@@ -297,12 +300,12 @@ entity_types:
     tags: [duck]
     on_update:
       - when:
-          age: [0.5, null]  # After 0.5 seconds
+          age: [2.0, null]  # After 2 seconds
         transform:
           type: duck_falling
     render:
       - shape: sprite
-        sprite_name: green_hit
+        sprite: green_hit
 
   # ---------------------------------------------------------------------------
   # Duck - Falling state
@@ -314,15 +317,18 @@ entity_types:
     height: 41
     color: gray
     sprite: green_fall_1
-    behaviors: [gravity]
+    behaviors: [gravity, animate]
     behavior_config:
       gravity:
         acceleration: 800
         destroy_offscreen: true
+      animate:
+        frames: 2
+        fps: 5
     tags: [duck]
     render:
       - shape: sprite
-        sprite_name: green_fall_1
+        sprite: green_fall_{frame}
 
   # ---------------------------------------------------------------------------
   # Spawner - invisible entity that spawns ducks
@@ -361,7 +367,7 @@ entity_types:
                       -- Random edge spawn
                       local edge = math.floor(ams.random() * 3)
                       local x, y, vx, vy
-                      local speed = ams.random_range(150, 300)
+                      local speed = ams.random_range(50, 150)
 
                       if edge == 0 then
                           -- Left edge
@@ -403,6 +409,12 @@ entity_types:
 # Input Mapping
 # =============================================================================
 # on_hit: fires when input position is INSIDE the entity bounds
+
+# Global input - plays shot sound on any click
+global_on_input:
+  action: play_sound
+  action_args:
+    sound: shot
 
 input_mapping:
   duck_flying:

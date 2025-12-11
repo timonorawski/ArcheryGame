@@ -14,6 +14,7 @@ Directory structure:
 - ams/behaviors/lua/               - Entity behaviors (single entity)
 - ams/behaviors/collision_actions/ - Collision actions (two entities)
 - ams/behaviors/generators/        - Property generators (return computed values)
+- ams/input_actions/               - Input actions (triggered by user input)
 """
 
 from pathlib import Path
@@ -87,6 +88,7 @@ class BehaviorEngine:
     BEHAVIORS_DIR = Path(__file__).parent / 'lua'
     COLLISION_ACTIONS_DIR = Path(__file__).parent / 'collision_actions'
     GENERATORS_DIR = Path(__file__).parent / 'generators'
+    INPUT_ACTIONS_DIR = Path(__file__).parent.parent / 'input_actions'
 
     def __init__(self, screen_width: float = 800, screen_height: float = 600):
         self.screen_width = screen_width
@@ -105,6 +107,9 @@ class BehaviorEngine:
 
         # Loaded property generators (name -> lua function table)
         self._generators: dict[str, Any] = {}
+
+        # Loaded input actions (name -> lua function table)
+        self._input_actions: dict[str, Any] = {}
 
         # Pending entity spawns/destroys (processed end of frame)
         self._pending_spawns: list[Entity] = []
@@ -557,6 +562,138 @@ class BehaviorEngine:
 
         except Exception as e:
             print(f"[BehaviorEngine] Error executing collision action {action_name}: {e}")
+            return False
+
+    # =========================================================================
+    # Input Actions
+    # =========================================================================
+
+    def load_input_action(self, name: str, path: Optional[Path] = None) -> bool:
+        """
+        Load an input action script.
+
+        Input actions are triggered by user input (clicks, touches, etc.).
+        They expose an `execute(x, y, args)` function that receives:
+        - x, y: Input position in screen coordinates
+        - args: Lua table of action arguments from YAML config
+
+        If path is None, looks in INPUT_ACTIONS_DIR for {name}.lua.
+
+        Returns True if loaded successfully.
+        """
+        if name in self._input_actions:
+            return True  # Already loaded
+
+        if path is None:
+            path = self.INPUT_ACTIONS_DIR / f'{name}.lua'
+
+        if not path.exists():
+            print(f"[BehaviorEngine] Input action file not found: {path}")
+            return False
+
+        try:
+            with open(path, 'r') as f:
+                lua_code = f.read()
+
+            result = self._lua.execute(lua_code)
+
+            if result is None or not hasattr(result, 'execute'):
+                print(f"[BehaviorEngine] Input action {name} did not return a table with execute function")
+                return False
+
+            self._input_actions[name] = result
+            return True
+
+        except Exception as e:
+            print(f"[BehaviorEngine] Error loading input action {name}: {e}")
+            return False
+
+    def load_inline_input_action(self, name: str, lua_code: str) -> bool:
+        """
+        Load an inline input action from a Lua code string.
+
+        The code should define a table with an `execute(x, y, args)` function
+        and return it.
+
+        Example inline input action in YAML:
+            global_on_input:
+              action:
+                lua: |
+                  local action = {}
+                  function action.execute(x, y, args)
+                      ams.play_sound("shot")
+                      -- Custom logic here
+                  end
+                  return action
+
+        Args:
+            name: Unique name for this inline input action
+            lua_code: Lua source code defining the action table
+
+        Returns:
+            True if loaded successfully
+        """
+        if name in self._input_actions:
+            return True  # Already loaded
+
+        try:
+            result = self._lua.execute(lua_code)
+
+            if result is None or not hasattr(result, 'execute'):
+                print(f"[BehaviorEngine] Inline input action {name} did not return a table with execute function")
+                return False
+
+            self._input_actions[name] = result
+            return True
+
+        except Exception as e:
+            print(f"[BehaviorEngine] Error loading inline input action {name}: {e}")
+            return False
+
+    def execute_input_action(
+        self,
+        action_name: str,
+        x: float,
+        y: float,
+        args: Optional[dict[str, Any]] = None
+    ) -> bool:
+        """
+        Execute an input action.
+
+        Args:
+            action_name: Name of the input action to execute
+            x: Input x position in screen coordinates
+            y: Input y position in screen coordinates
+            args: Optional arguments dict passed to the action
+
+        Returns:
+            True if action executed successfully
+        """
+        # Load action if not already loaded
+        if action_name not in self._input_actions:
+            if not self.load_input_action(action_name):
+                return False
+
+        action = self._input_actions.get(action_name)
+        if not action:
+            return False
+
+        execute_fn = getattr(action, 'execute', None)
+        if not execute_fn:
+            print(f"[BehaviorEngine] Input action {action_name} has no execute function")
+            return False
+
+        try:
+            # Convert args dict to Lua table if provided
+            lua_args = None
+            if args:
+                lua_args = self._lua.table_from(args)
+
+            execute_fn(x, y, lua_args)
+            return True
+
+        except Exception as e:
+            print(f"[BehaviorEngine] Error executing input action {action_name}: {e}")
             return False
 
     def load_generator(self, name: str, path: Optional[Path] = None) -> bool:
