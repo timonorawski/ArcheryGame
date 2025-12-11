@@ -417,3 +417,186 @@ Games use `scale_for_pacing()` to adjust timing parameters:
 4. **Settings Persistence** - Remember backend/pacing preferences
 5. **Haptic Feedback** - Vibrate phone on hits/misses
 6. **Voice Commands** - "Pause", "Resume" via phone microphone
+
+---
+
+## FUTURE: QR Code Authentication
+
+### Problem
+
+In uncontrolled environments (public venues, events, shared spaces), the current "no auth on local network" model is insufficient:
+- Multiple untrusted devices on the same network
+- Can't assume network isolation
+- Need to prevent unauthorized control of the session
+- Password entry is friction (typing on phone while holding equipment)
+
+### Solution: QR Code with Embedded Auth Token
+
+The projected QR code contains a URL with a cryptographically secure session token:
+
+```
+http://192.168.1.100:8080/?token=a3f8c2e1b9d4...
+```
+
+Scanning the QR code is the authentication — no password needed.
+
+### Security Properties
+
+| Property | Implementation |
+|----------|----------------|
+| **Session-scoped** | Token generated fresh on AMS startup, invalidated on shutdown |
+| **Unguessable** | 256-bit cryptographically random token |
+| **Single-use option** | Token can be marked "claimed" after first connection |
+| **Revocable** | Operator can regenerate token from keyboard, invalidating old QR |
+| **No secrets on network** | Token travels in URL, but attacker must physically see the projection |
+
+### Threat Model
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Physical Space                                    │
+│                                                                          │
+│    ┌──────────────┐         ┌──────────────────────────────────────┐   │
+│    │   Attacker   │         │          Projection Surface           │   │
+│    │   (on WiFi)  │         │  ┌────────────────────────────────┐  │   │
+│    │              │    👁️    │  │         QR CODE                │  │   │
+│    │  Can't see ──┼─────✗───┼─►│  http://...?token=secret       │  │   │
+│    │  projection  │         │  │                                 │  │   │
+│    └──────────────┘         │  └────────────────────────────────┘  │   │
+│                             └──────────────────────────────────────┘   │
+│                                           │                              │
+│    ┌──────────────┐                       │ 👁️ Can see                   │
+│    │  Legitimate  │◄──────────────────────┘                              │
+│    │    User      │                                                      │
+│    │  (scans QR)  │                                                      │
+│    └──────────────┘                                                      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key insight**: The projection surface is a secure side-channel. Only people physically present can see the QR code.
+
+### Authentication Flow
+
+```
+┌─────────┐          ┌─────────┐          ┌─────────┐
+│   AMS   │          │  Phone  │          │  User   │
+└────┬────┘          └────┬────┘          └────┬────┘
+     │                    │                    │
+     │  Generate token    │                    │
+     │  Display QR code   │                    │
+     │◄───────────────────┼────────────────────┤ Sees projection
+     │                    │                    │
+     │                    │◄───────────────────┤ Scans QR
+     │                    │                    │
+     │  GET /?token=xxx   │                    │
+     │◄───────────────────┤                    │
+     │                    │                    │
+     │  Validate token    │                    │
+     │  Set session cookie│                    │
+     │────────────────────►                    │
+     │                    │                    │
+     │  WS /ws            │                    │
+     │◄───────────────────┤ (cookie attached)  │
+     │                    │                    │
+     │  Authenticated ✓   │                    │
+     │────────────────────►                    │
+     │                    │                    │
+```
+
+### Token Modes
+
+#### 1. Open Mode (Current Default)
+No token required. For trusted home/private networks.
+
+```python
+WEB_CONTROLLER_AUTH = "none"
+```
+
+#### 2. Token Mode (Uncontrolled Environments)
+QR contains token, validated on connection.
+
+```python
+WEB_CONTROLLER_AUTH = "token"
+```
+
+#### 3. Single-Claim Mode (High Security)
+Token can only be used once. After first connection, QR regenerates.
+
+```python
+WEB_CONTROLLER_AUTH = "single_claim"
+```
+
+Useful for: public events where you want one controller at a time.
+
+### Implementation Sketch
+
+```python
+# server.py additions
+
+import secrets
+
+class WebController:
+    def __init__(self, auth_mode: str = "none"):
+        self.auth_mode = auth_mode
+        self.session_token = secrets.token_urlsafe(32) if auth_mode != "none" else None
+        self.token_claimed = False
+
+    def get_connection_url(self) -> str:
+        base = f"http://{self.host}:{self.port}"
+        if self.session_token:
+            return f"{base}/?token={self.session_token}"
+        return base
+
+    def regenerate_token(self) -> str:
+        """Invalidate old token, generate new one. Called via keyboard shortcut."""
+        self.session_token = secrets.token_urlsafe(32)
+        self.token_claimed = False
+        return self.session_token
+
+    async def validate_token(self, token: str) -> bool:
+        if self.auth_mode == "none":
+            return True
+        if token != self.session_token:
+            return False
+        if self.auth_mode == "single_claim":
+            if self.token_claimed:
+                return False
+            self.token_claimed = True
+            self.regenerate_token()  # New QR for next person
+        return True
+```
+
+### QR Code Display
+
+Idle screen shows QR code prominently:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│                     AMS Ready                               │
+│                                                             │
+│              ┌─────────────────────┐                        │
+│              │ ▄▄▄▄▄ ▄▄▄▄▄ ▄▄▄▄▄ │                        │
+│              │ █   █ █▄▄▄█ █   █ │                        │
+│              │ █▄▄▄█ █   █ █▄▄▄█ │                        │
+│              │ ▄▄▄▄▄ ▄▄▄▄▄ ▄▄▄▄▄ │                        │
+│              │ █   █ █   █ █   █ │                        │
+│              │ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ │                        │
+│              └─────────────────────┘                        │
+│                                                             │
+│              Scan to connect                                │
+│              ─────────────────                              │
+│              Or visit: 192.168.1.100:8080                   │
+│                                                             │
+│              Press [R] to regenerate QR code                │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Considerations
+
+- **Token in URL**: Visible in browser history. Acceptable because token is session-scoped and physically-derived.
+- **HTTPS**: Not required for local network, but could add self-signed cert for paranoid mode.
+- **Token rotation**: Could auto-rotate every N minutes for extra security.
+- **Audit log**: Could log connection attempts with timestamps for post-hoc review.
+- **Multiple tokens**: Could generate per-role tokens (controller vs spectator) shown in different QR codes.
