@@ -18,6 +18,7 @@ Usage:
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
@@ -27,6 +28,52 @@ import yaml
 from games.common import BaseGame, GameState
 from games.common.input import InputEvent
 from ams.behaviors import BehaviorEngine, Entity
+
+
+# =============================================================================
+# Schema Validation
+# =============================================================================
+
+_game_schema: Optional[Dict[str, Any]] = None
+_SCHEMAS_DIR = Path(__file__).parent.parent.parent / 'schemas'
+
+
+def _get_game_schema() -> Optional[Dict[str, Any]]:
+    """Lazy-load game schema."""
+    global _game_schema
+    if _game_schema is None:
+        schema_path = _SCHEMAS_DIR / 'game.schema.json'
+        if schema_path.exists():
+            with open(schema_path) as f:
+                _game_schema = json.load(f)
+    return _game_schema
+
+
+def validate_game_yaml(data: Dict[str, Any], source_path: Optional[Path] = None) -> List[str]:
+    """Validate game YAML data against schema.
+
+    Args:
+        data: Parsed YAML data
+        source_path: Optional path for error messages
+
+    Returns:
+        List of validation error messages (empty if valid)
+    """
+    schema = _get_game_schema()
+    if schema is None:
+        return []  # No schema available, skip validation
+
+    try:
+        import jsonschema
+        jsonschema.validate(data, schema)
+        return []
+    except jsonschema.ValidationError as e:
+        path_str = f" in {source_path}" if source_path else ""
+        return [f"Schema validation error{path_str}: {e.message} at {'/'.join(str(p) for p in e.absolute_path)}"]
+    except jsonschema.SchemaError as e:
+        return [f"Invalid schema: {e.message}"]
+    except ImportError:
+        return []  # jsonschema not installed, skip validation
 
 
 # Protocol for entity placements in levels
@@ -867,6 +914,11 @@ class GameEngine(BaseGame):
         """Load game definition from YAML file."""
         with open(path) as f:
             data = yaml.safe_load(f)
+
+        # Validate against schema
+        errors = validate_game_yaml(data, path)
+        for error in errors:
+            print(f"[GameEngine] {error}")
 
         # Parse assets section
         assets_data = data.get('assets', {})

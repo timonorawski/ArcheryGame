@@ -37,6 +37,52 @@ except ImportError:
     yaml = None  # type: ignore
 
 
+# =============================================================================
+# Schema Validation
+# =============================================================================
+
+_level_schema: Optional[Dict[str, Any]] = None
+_SCHEMAS_DIR = Path(__file__).parent.parent.parent / 'schemas'
+
+
+def _get_level_schema() -> Optional[Dict[str, Any]]:
+    """Lazy-load level schema."""
+    global _level_schema
+    if _level_schema is None:
+        schema_path = _SCHEMAS_DIR / 'level.schema.json'
+        if schema_path.exists():
+            with open(schema_path) as f:
+                _level_schema = json.load(f)
+    return _level_schema
+
+
+def validate_level_yaml(data: Dict[str, Any], source_path: Optional[Path] = None) -> List[str]:
+    """Validate level YAML data against schema.
+
+    Args:
+        data: Parsed YAML data
+        source_path: Optional path for error messages
+
+    Returns:
+        List of validation error messages (empty if valid)
+    """
+    schema = _get_level_schema()
+    if schema is None:
+        return []  # No schema available, skip validation
+
+    try:
+        import jsonschema
+        jsonschema.validate(data, schema)
+        return []
+    except jsonschema.ValidationError as e:
+        path_str = f" in {source_path}" if source_path else ""
+        return [f"Schema validation error{path_str}: {e.message} at {'/'.join(str(p) for p in e.absolute_path)}"]
+    except jsonschema.SchemaError as e:
+        return [f"Invalid schema: {e.message}"]
+    except ImportError:
+        return []  # jsonschema not installed, skip validation
+
+
 def _load_data_file(path: Path) -> Dict[str, Any]:
     """Load data from YAML or JSON file.
 
@@ -294,6 +340,11 @@ class LevelLoader(Generic[T], ABC):
 
         if not data:
             raise ValueError(f"Empty level file: {slug}")
+
+        # Validate against schema
+        errors = validate_level_yaml(data, path)
+        for error in errors:
+            print(f"[LevelLoader] {error}")
 
         if data.get('group', False):
             raise ValueError(f"'{slug}' is a level group, not a level")
