@@ -10,37 +10,26 @@ This document tracks known technical debt and improvement opportunities in the A
 **Issue**: `models.py` (root) duplicates definitions in `models/` package.
 **Fix**: Deleted root `models.py`. All imports now use `models/` package.
 
-### 2. DuckHunt Not Using BaseGame
-**Issue**: DuckHunt has its own `GameMode` ABC (`games/DuckHunt/game/game_mode.py:16`) instead of inheriting from `BaseGame`.
-**Impact**: Registry special-casing, inconsistent interface, harder to write game-agnostic code.
-**Fix**: Either migrate DuckHunt to BaseGame or document architectural decision.
+### ~~2. DuckHunt Not Using BaseGame~~ ✓ FIXED
+**Issue**: DuckHunt had its own `GameMode` ABC instead of inheriting from `BaseGame`.
+**Fix**: All 11 game_mode.py files now inherit from BaseGame or GameEngine.
 
-### 3. Hardcoded Path in detection_backend.py
-**Issue**: Line 20 references `'Games'` instead of `'games'`.
-```python
-sys.path.insert(0, os.path.join(..., 'Games', 'DuckHunt'))  # Wrong
-```
-**Impact**: Case-sensitive systems will fail to find DuckHunt.
-**Fix**: Change to lowercase `'games'`.
+### ~~3. Hardcoded Path in detection_backend.py~~ ✓ FIXED
+**Issue**: Line 20 referenced `'Games'` instead of `'games'`.
+**Fix**: Changed to lowercase `'games'`.
 
 ### 4. Missing Test Coverage
-**Issue**: Only DuckHunt has tests (12 files). No tests for:
+**Issue**: Test coverage is improving but still gaps in:
 - AMS core (`ams/session.py`, detection backends)
 - Calibration (`calibration/`)
-- Game registry (`games/registry.py`)
-- Other 7 games
+- GameEngine/LuaEngine integration
 
 **Impact**: Regressions can slip through unnoticed.
 **Fix**: Add test suite for critical paths.
 
-### 5. Migration Artifact Files
-**Issue**: Leftover test files from BaseGame migration:
-- `test_balloonpop_migration.py`
-- `test_fruitslice_migration.py`
-- `test_manytargets_migration.py`
-- `quick_test.py`
-
-**Fix**: Delete these files or integrate into proper test suite.
+### ~~5. Migration Artifact Files~~ ✓ FIXED
+**Issue**: Leftover test files from BaseGame migration.
+**Fix**: Deleted migration test artifacts.
 
 ---
 
@@ -59,10 +48,15 @@ sys.path.insert(0, os.path.join(..., 'Games', 'DuckHunt'))  # Wrong
 **Issue**: `except Exception:` hides specific errors.
 **Fix**: Catch specific exceptions, add error logging.
 
-### 8. Configuration Sprawl
-**Issue**: 8 game config files + AMS config, each with redundant settings.
-**Impact**: Inconsistencies between games, hard to change global settings.
-**Fix**: Consider centralized config with game-specific overrides.
+### 8. Configuration Sprawl (Legacy Python Games) — Will Self-Resolve
+**Issue**: Each legacy Python game has its own `config.py` with duplicated boilerplate and inconsistent patterns.
+
+**Affected**: Containment, Grouping, DuckHunt, Gradient, SweetPhysics, BrickBreaker
+
+**Resolution**: Legacy Python games will be deleted once reimplemented as NG (YAML+Lua) games.
+NG games use standardized `game.yaml` schema — no per-game config.py needed.
+
+**No action required** — debt resolves naturally as NG ports are completed.
 
 ### 9. TODO Comments
 | File | Line | Issue |
@@ -76,8 +70,10 @@ sys.path.insert(0, os.path.join(..., 'Games', 'DuckHunt'))  # Wrong
 ### 10. Documentation Gaps
 - ~~No AMS event flow diagram~~ ✓ See `docs/architecture/AMS_ARCHITECTURE.md`
 - ~~Architectural decisions not documented~~ ✓ See `docs/architecture/AMS_ARCHITECTURE.md`
+- ~~No GameEngine/LuaEngine architecture~~ ✓ See `docs/architecture/LUA_ENGINE_ARCHITECTURE.md`
+- ~~No Lua scripting guide~~ ✓ See `docs/guides/lua_scripting.md`
+- ~~No YAML game quickstart~~ ✓ See `docs/guides/YAML_GAME_QUICKSTART.md`
 - No calibration workflow documentation (step-by-step user guide)
-- Step-by-step guide for adding new games exists but could be expanded
 
 ---
 
@@ -103,42 +99,43 @@ sys.path.insert(0, os.path.join(..., 'Games', 'DuckHunt'))  # Wrong
 
 These patterns exist in parts of the codebase and should be adopted more widely.
 
-### 1. YAML Game Mode Configuration (DuckHunt)
+### 1. YAML + Lua Game Engine ✓ FULLY REALIZED
 
-**Location**: `games/DuckHunt/modes/*.yaml`
+**Location**: `ams/games/game_engine/` + `games/*NG/`
 
-**Pattern**: Game modes defined entirely in YAML files, not code:
+**Pattern**: Games defined entirely in YAML + Lua, no Python game logic:
 
 ```yaml
-# modes/classic_ducks.yaml
-name: "Classic Duck Hunt"
-trajectory:
-  algorithm: "bezier_3d"
-  curvature_factor: 1.0
-pacing:
-  spawn_interval: 2.5
-  target_lifetime: 6.0
-levels:
-  - level: 1
-    target:
-      size: 100.0
-      speed: 80.0
-    spawning:
-      max_active: 1
+# games/BrickBreakerNG/game.yaml
+name: "Brick Breaker NG"
+entity_types:
+  ball:
+    behaviors: [ball, bounce]
+    behavior_config:
+      ball: {speed: 300}
+  paddle:
+    behaviors: [paddle]
+collision_behaviors:
+  ball:
+    paddle: {action: bounce_paddle}
+    brick: {action: take_damage}
 ```
 
-**Benefits**:
-- Magic numbers extracted from code
-- Easy to tweak without code changes
-- Non-programmers can create/tune game modes
-- Version control shows config changes clearly
-- Multiple modes without code duplication
+**Status**: 7 "NG" games now use this pattern:
+- BrickBreakerNG, DuckHuntNG, FruitSliceNG, GroupingNG
+- LoveOMeterNG, RopeTestNG, SweetPhysicsNG
 
-**Candidates for adoption**:
-- GrowingTargets: level progression could be YAML
-- FruitSlice: difficulty presets could be YAML
-- ManyTargets: progressive mode settings
-- Containment: tempo presets
+**Architecture documented in**:
+- `docs/architecture/LUA_ENGINE_ARCHITECTURE.md`
+- `docs/GAME_ENGINE_ARCHITECTURE.md`
+- `docs/guides/lua_scripting.md`
+- `docs/guides/YAML_GAME_QUICKSTART.md`
+
+**Benefits**:
+- Zero Python code for game logic
+- Lua behaviors are composable and reusable
+- ContentFS layering allows game-specific overrides
+- Sandboxed Lua safe for web deployment
 
 ### 2. Pacing Presets (Common Infrastructure)
 
@@ -261,18 +258,37 @@ All games except DuckHunt now use BaseGame:
 - Updated key modules: session.py, calibration.py, laser_detection_backend.py, object_detection_backend.py
 - Established pattern: `logger = logging.getLogger('ams.modulename')`
 
+### ✓ GameEngine + LuaEngine Architecture (December 2024)
+
+- Created YAML-driven game engine (`ams/games/game_engine/`)
+- Sandboxed Lua scripting via lupa (`ams/lua/`)
+- 7 "NG" games created using pure YAML + Lua (no Python game logic)
+- ContentFS layered filesystem for game overrides
+- Comprehensive documentation:
+  - `docs/architecture/LUA_ENGINE_ARCHITECTURE.md`
+  - `docs/GAME_ENGINE_ARCHITECTURE.md`
+  - `docs/guides/lua_scripting.md`
+  - `docs/guides/YAML_GAME_QUICKSTART.md`
+
+### ✓ All Games Using BaseGame/GameEngine (December 2024)
+
+- All 18 games now inherit from BaseGame or GameEngine
+- DuckHunt migrated to BaseGame
+- Legacy games: 11 using BaseGame with Python logic
+- NG games: 7 using GameEngine with YAML + Lua
+
 ---
 
 ## Statistics
 
 | Metric | Count |
 |--------|-------|
-| Python files | 126 |
-| Games | 8 |
-| Test files | 12 (DuckHunt only) |
+| Python files | ~200 (core), ~5000 (with tests/deps) |
+| Games (legacy Python) | 11 |
+| Games (YAML+Lua NG) | 7 |
+| Test files | 649 |
 | TODO comments | 5 |
-| Files needing logging | 12 |
-| Games using BaseGame | 7/8 |
+| Games using BaseGame/GameEngine | 18/18 |
 
 ---
 
@@ -284,17 +300,18 @@ All games except DuckHunt now use BaseGame:
    - ~~Consolidate models imports~~ ✓ Done (removed root `models.py`)
 
 2. **Next sprint**:
-   - Add logging infrastructure to AMS/calibration
+   - ~~Add logging infrastructure to AMS/calibration~~ ✓ Done
    - Write tests for game registry
+   - Write tests for GameEngine/LuaEngine integration
    - ~~Document DuckHunt architecture decision~~ ✓ Done (ADR-004 in AMS_ARCHITECTURE.md)
 
-3. **Pattern spreading**:
-   - Create `games/common/config_loader.py` for shared YAML parsing
+3. **Pattern spreading** (largely complete via GameEngine):
+   - ~~YAML config support for games~~ ✓ Done (GameEngine + NG games)
+   - Migrate remaining legacy games to GameEngine when appropriate
    - Convert pacing presets to YAML (`games/common/pacing_presets.yaml`)
-   - Add YAML config support to BaseGame for level progression
-   - Extract GrowingTargets/FruitSlice/Containment settings to YAML
 
 4. **Future**:
-   - Migrate DuckHunt to BaseGame (or document why not)
-   - Add comprehensive test coverage
-   - Centralize configuration management
+   - ~~Migrate games to BaseGame~~ ✓ Done (all 18 games)
+   - Add comprehensive test coverage for GameEngine
+   - Browser/WASM deployment of YAML+Lua games
+   - Calibration workflow documentation
