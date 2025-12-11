@@ -1,6 +1,6 @@
 # ArcheryGame – Arcade joy for everyone, everywhere
 
-A complete, free, and open platform that brings real arcade magic back and makes it even better – without the downsides of modern gaming.
+A complete, free, and open platform that brings real arcade magic back and makes it even better – without the downsides of modern gaming or the risk of running untrusted binary code.
 
 You can play these games with:
 - a mouse (for testing)
