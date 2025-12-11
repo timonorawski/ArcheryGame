@@ -676,11 +676,16 @@ def launch_balloonpop(args, screen, detection_backend, ams):
             print("="*60)
             running = False
         elif game.state == GameState.WON:
-            print("\n" + "="*60)
-            print("YOU WIN!")
-            print(f"Final Score: {game.get_score()}")
-            print("="*60)
-            running = False
+            # Try to advance to next level in group
+            if hasattr(game, 'advance_level') and game.advance_level():
+                print(f"\n>>> Advancing to next level...")
+                continue
+            else:
+                print("\n" + "="*60)
+                print("YOU WIN!")
+                print(f"Final Score: {game.get_score()}")
+                print("="*60)
+                running = False
 
     return 0
 
@@ -719,7 +724,7 @@ def launch_game_generic(args, screen, detection_backend, ams, registry: GameRegi
 
     # Collect game-specific kwargs from args
     game_kwargs = {}
-    for key in ['mode', 'spawn_rate', 'max_escaped', 'target_pops', 'skin', 'level', 'pacing']:
+    for key in ['mode', 'spawn_rate', 'max_escaped', 'target_pops', 'skin', 'level', 'level_group', 'pacing']:
         if hasattr(args, key):
             value = getattr(args, key)
             if value is not None:
@@ -828,11 +833,16 @@ def launch_game_generic(args, screen, detection_backend, ams, registry: GameRegi
             print("="*60)
             running = False
         elif hasattr(GameState, 'WON') and game.state == GameState.WON:
-            print("\n" + "="*60)
-            print("YOU WIN!")
-            print(f"Final Score: {game.get_score()}")
-            print("="*60)
-            running = False
+            # Try to advance to next level in group
+            if hasattr(game, 'advance_level') and game.advance_level():
+                print(f"\n>>> Advancing to next level...")
+                continue
+            else:
+                print("\n" + "="*60)
+                print("YOU WIN!")
+                print(f"Final Score: {game.get_score()}")
+                print("="*60)
+                running = False
 
     return 0
 
@@ -905,8 +915,14 @@ Examples:
     parser.add_argument(
         '--level',
         type=str,
-        default='classic',
-        help='Level name for duckhunt (from levels/ dir or "classic")'
+        default=None,
+        help='Level name to play (from levels/ dir)'
+    )
+    parser.add_argument(
+        '--level-group',
+        type=str,
+        default=None,
+        help='Level group/campaign to play through (e.g., "tutorial")'
     )
     parser.add_argument(
         '--pacing',
