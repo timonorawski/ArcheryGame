@@ -41,8 +41,18 @@ except ImportError:
 # Schema Validation
 # =============================================================================
 
+import os
+
 _level_schema: Optional[Dict[str, Any]] = None
 _SCHEMAS_DIR = Path(__file__).parent.parent.parent / 'schemas'
+
+# Set AMS_SKIP_SCHEMA_VALIDATION=1 to disable strict validation
+_SKIP_VALIDATION = os.environ.get('AMS_SKIP_SCHEMA_VALIDATION', '').lower() in ('1', 'true', 'yes')
+
+
+class SchemaValidationError(Exception):
+    """Raised when YAML data fails schema validation."""
+    pass
 
 
 def _get_level_schema() -> Optional[Dict[str, Any]]:
@@ -56,31 +66,49 @@ def _get_level_schema() -> Optional[Dict[str, Any]]:
     return _level_schema
 
 
-def validate_level_yaml(data: Dict[str, Any], source_path: Optional[Path] = None) -> List[str]:
+def validate_level_yaml(data: Dict[str, Any], source_path: Optional[Path] = None) -> None:
     """Validate level YAML data against schema.
 
     Args:
         data: Parsed YAML data
         source_path: Optional path for error messages
 
-    Returns:
-        List of validation error messages (empty if valid)
+    Raises:
+        SchemaValidationError: If validation fails (unless AMS_SKIP_SCHEMA_VALIDATION=1)
+        ImportError: If jsonschema is not installed (unless AMS_SKIP_SCHEMA_VALIDATION=1)
     """
     schema = _get_level_schema()
     if schema is None:
-        return []  # No schema available, skip validation
+        error_msg = f"Schema file not found: {_SCHEMAS_DIR / 'level.schema.json'}"
+        if _SKIP_VALIDATION:
+            print(f"[LevelLoader] Warning: {error_msg}")
+            return
+        raise SchemaValidationError(error_msg)
 
     try:
         import jsonschema
+    except ImportError as e:
+        error_msg = "jsonschema package not installed - required for YAML validation"
+        if _SKIP_VALIDATION:
+            print(f"[LevelLoader] Warning: {error_msg}")
+            return
+        raise ImportError(error_msg) from e
+
+    try:
         jsonschema.validate(data, schema)
-        return []
     except jsonschema.ValidationError as e:
         path_str = f" in {source_path}" if source_path else ""
-        return [f"Schema validation error{path_str}: {e.message} at {'/'.join(str(p) for p in e.absolute_path)}"]
+        error_msg = f"Schema validation error{path_str}: {e.message} at {'/'.join(str(p) for p in e.absolute_path)}"
+        if _SKIP_VALIDATION:
+            print(f"[LevelLoader] Warning: {error_msg}")
+        else:
+            raise SchemaValidationError(error_msg) from e
     except jsonschema.SchemaError as e:
-        return [f"Invalid schema: {e.message}"]
-    except ImportError:
-        return []  # jsonschema not installed, skip validation
+        error_msg = f"Invalid schema: {e.message}"
+        if _SKIP_VALIDATION:
+            print(f"[LevelLoader] Warning: {error_msg}")
+        else:
+            raise SchemaValidationError(error_msg) from e
 
 
 def _load_data_file(path: Path) -> Dict[str, Any]:
@@ -341,10 +369,8 @@ class LevelLoader(Generic[T], ABC):
         if not data:
             raise ValueError(f"Empty level file: {slug}")
 
-        # Validate against schema
-        errors = validate_level_yaml(data, path)
-        for error in errors:
-            print(f"[LevelLoader] {error}")
+        # Validate against schema (raises SchemaValidationError unless AMS_SKIP_SCHEMA_VALIDATION=1)
+        validate_level_yaml(data, path)
 
         if data.get('group', False):
             raise ValueError(f"'{slug}' is a level group, not a level")
