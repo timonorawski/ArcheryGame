@@ -1498,8 +1498,12 @@ class GameEngine(BaseGame):
         3. Dict with data URI: {data: "data:image/png;base64,..."}
         4. File reference: {file: "@sheet_name", x: 0, y: 0, ...}
         5. Either can have region: {x: 0, y: 0, width: 32, height: 32}
+        6. Inheritance: {sprite: base_sprite, x: 10, y: 20} - inherits and overrides
         """
         result: Dict[str, SpriteConfig] = {}
+
+        # First pass: parse all sprites without resolving inheritance
+        raw_sprites: Dict[str, Dict[str, Any]] = {}
 
         for name, sprite_data in sprites_data.items():
             if isinstance(sprite_data, str):
@@ -1507,34 +1511,103 @@ class GameEngine(BaseGame):
                 file_path, data_uri = self._resolve_file_reference(sprite_data, files)
                 result[name] = SpriteConfig(file=file_path, data=data_uri)
             elif isinstance(sprite_data, dict):
-                # Dict format with optional fields
+                raw_sprites[name] = sprite_data
+
+        # Second pass: resolve inheritance and build final configs
+        # Process in order, resolving dependencies
+        def resolve_sprite(name: str, visited: set) -> SpriteConfig:
+            if name in result:
+                return result[name]
+
+            if name not in raw_sprites:
+                # Unknown sprite reference
+                return SpriteConfig(file='', data=None)
+
+            if name in visited:
+                print(f"[GameEngine] Circular sprite inheritance detected: {name}")
+                return SpriteConfig(file='', data=None)
+
+            visited.add(name)
+            sprite_data = raw_sprites[name]
+
+            # Check for inheritance via 'sprite' field
+            base_sprite_name = sprite_data.get('sprite')
+            if base_sprite_name:
+                # Resolve base sprite first
+                base = resolve_sprite(base_sprite_name, visited)
+                # Start with base values
+                file_path = base.file
+                data_uri = base.data
+                transparent = base.transparent
+                x = base.x
+                y = base.y
+                width = base.width
+                height = base.height
+                flip_x = base.flip_x
+                flip_y = base.flip_y
+            else:
+                # No inheritance, start fresh
+                file_path = ''
+                data_uri = None
                 transparent = None
-                if 'transparent' in sprite_data:
-                    t = sprite_data['transparent']
-                    if isinstance(t, (list, tuple)) and len(t) >= 3:
-                        transparent = (int(t[0]), int(t[1]), int(t[2]))
+                x = None
+                y = None
+                width = None
+                height = None
+                flip_x = False
+                flip_y = False
 
-                # Resolve file reference if present
-                file_value = sprite_data.get('file', '')
-                data_value = sprite_data.get('data')
+            # Override with values from this sprite's definition
+            if 'transparent' in sprite_data:
+                t = sprite_data['transparent']
+                if isinstance(t, (list, tuple)) and len(t) >= 3:
+                    transparent = (int(t[0]), int(t[1]), int(t[2]))
 
-                if file_value and file_value.startswith('@'):
+            # Resolve file reference if present
+            file_value = sprite_data.get('file', '')
+            data_value = sprite_data.get('data')
+
+            if file_value:
+                if file_value.startswith('@'):
                     file_path, data_uri = self._resolve_file_reference(file_value, files)
                 else:
                     file_path = file_value
-                    data_uri = data_value
+                    data_uri = None
 
-                result[name] = SpriteConfig(
-                    file=file_path,
-                    data=data_uri,
-                    transparent=transparent,
-                    x=sprite_data.get('x'),
-                    y=sprite_data.get('y'),
-                    width=sprite_data.get('width'),
-                    height=sprite_data.get('height'),
-                    flip_x=sprite_data.get('flip_x', False),
-                    flip_y=sprite_data.get('flip_y', False),
-                )
+            if data_value:
+                data_uri = data_value
+
+            # Override region/flip if specified
+            if 'x' in sprite_data:
+                x = sprite_data['x']
+            if 'y' in sprite_data:
+                y = sprite_data['y']
+            if 'width' in sprite_data:
+                width = sprite_data['width']
+            if 'height' in sprite_data:
+                height = sprite_data['height']
+            if 'flip_x' in sprite_data:
+                flip_x = sprite_data['flip_x']
+            if 'flip_y' in sprite_data:
+                flip_y = sprite_data['flip_y']
+
+            config = SpriteConfig(
+                file=file_path,
+                data=data_uri,
+                transparent=transparent,
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                flip_x=flip_x,
+                flip_y=flip_y,
+            )
+            result[name] = config
+            return config
+
+        # Resolve all raw sprites
+        for name in raw_sprites:
+            resolve_sprite(name, set())
 
         return result
 

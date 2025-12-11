@@ -36,184 +36,43 @@ assets:
     shot: shot.wav
 
   sprites:
+    # Base sprite sheet config - all sprites inherit from this
+    _sheet:
+      file: sprites.png
+      transparent: [159, 227, 163]
+
     # Green duck sprites (row at y=126)
-    green_right_1:
-      file: sprites.png
-      x: 7
-      y: 126
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-    green_right_2:
-      file: sprites.png
-      x: 48
-      y: 126
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-    green_right_3:
-      file: sprites.png
-      x: 88
-      y: 126
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-    green_up_1:
-      file: sprites.png
-      x: 134
-      y: 126
-      width: 35
-      height: 41
-      transparent: [159, 227, 163]
-    green_up_2:
-      file: sprites.png
-      x: 168
-      y: 126
-      width: 35
-      height: 41
-      transparent: [159, 227, 163]
-    green_up_3:
-      file: sprites.png
-      x: 202
-      y: 126
-      width: 35
-      height: 41
-      transparent: [159, 227, 163]
-    green_hit:
-      file: sprites.png
-      x: 236
-      y: 126
-      width: 35
-      height: 41
-      transparent: [159, 227, 163]
-    green_fall_1:
-      file: sprites.png
-      x: 279
-      y: 126
-      width: 22
-      height: 41
-      transparent: [159, 227, 163]
-    green_fall_2:
-      file: sprites.png
-      x: 302
-      y: 126
-      width: 22
-      height: 41
-      transparent: [159, 227, 163]
+    green_right_1: { sprite: _sheet, x: 7, y: 126, width: 37, height: 41 }
+    green_right_2: { sprite: _sheet, x: 48, y: 126, width: 37, height: 41 }
+    green_right_3: { sprite: _sheet, x: 88, y: 126, width: 37, height: 41 }
+    green_up_1: { sprite: _sheet, x: 134, y: 126, width: 35, height: 41 }
+    green_up_2: { sprite: _sheet, x: 168, y: 126, width: 35, height: 41 }
+    green_up_3: { sprite: _sheet, x: 202, y: 126, width: 35, height: 41 }
+    green_hit: { sprite: _sheet, x: 236, y: 126, width: 35, height: 41 }
+    green_fall_1: { sprite: _sheet, x: 279, y: 126, width: 22, height: 41 }
+    green_fall_2: { sprite: _sheet, x: 302, y: 126, width: 22, height: 41 }
 
-    # Green duck LEFT sprites (flipped from right)
-    green_left_1:
-      file: sprites.png
-      x: 7
-      y: 126
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-      flip_x: true
-    green_left_2:
-      file: sprites.png
-      x: 48
-      y: 126
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-      flip_x: true
-    green_left_3:
-      file: sprites.png
-      x: 88
-      y: 126
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-      flip_x: true
+    # Green duck LEFT sprites (inherit and flip)
+    green_left_1: { sprite: green_right_1, flip_x: true }
+    green_left_2: { sprite: green_right_2, flip_x: true }
+    green_left_3: { sprite: green_right_3, flip_x: true }
 
-    # Green duck UP_LEFT sprites (flipped from up_right)
-    green_up_left_1:
-      file: sprites.png
-      x: 134
-      y: 126
-      width: 35
-      height: 41
-      transparent: [159, 227, 163]
-      flip_x: true
-    green_up_left_2:
-      file: sprites.png
-      x: 168
-      y: 126
-      width: 35
-      height: 41
-      transparent: [159, 227, 163]
-      flip_x: true
-    green_up_left_3:
-      file: sprites.png
-      x: 202
-      y: 126
-      width: 35
-      height: 41
-      transparent: [159, 227, 163]
-      flip_x: true
+    # Green duck UP_LEFT sprites (inherit and flip)
+    green_up_left_1: { sprite: green_up_1, flip_x: true }
+    green_up_left_2: { sprite: green_up_2, flip_x: true }
+    green_up_left_3: { sprite: green_up_3, flip_x: true }
 
     # Blue duck sprites (row at y=168)
-    blue_right_1:
-      file: sprites.png
-      x: 7
-      y: 168
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-    blue_left_1:
-      file: sprites.png
-      x: 7
-      y: 168
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-      flip_x: true
-    blue_hit:
-      file: sprites.png
-      x: 236
-      y: 168
-      width: 35
-      height: 41
-      transparent: [159, 227, 163]
-    blue_fall_1:
-      file: sprites.png
-      x: 279
-      y: 168
-      width: 22
-      height: 41
-      transparent: [159, 227, 163]
+    blue_right_1: { sprite: _sheet, x: 7, y: 168, width: 37, height: 41 }
+    blue_left_1: { sprite: blue_right_1, flip_x: true }
+    blue_hit: { sprite: _sheet, x: 236, y: 168, width: 35, height: 41 }
+    blue_fall_1: { sprite: _sheet, x: 279, y: 168, width: 22, height: 41 }
 
     # Red duck sprites (row at y=210)
-    red_right_1:
-      file: sprites.png
-      x: 7
-      y: 210
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-    red_left_1:
-      file: sprites.png
-      x: 7
-      y: 210
-      width: 37
-      height: 41
-      transparent: [159, 227, 163]
-      flip_x: true
-    red_hit:
-      file: sprites.png
-      x: 236
-      y: 210
-      width: 35
-      height: 41
-      transparent: [159, 227, 163]
-    red_fall_1:
-      file: sprites.png
-      x: 279
-      y: 210
-      width: 22
-      height: 41
-      transparent: [159, 227, 163]
+    red_right_1: { sprite: _sheet, x: 7, y: 210, width: 37, height: 41 }
+    red_left_1: { sprite: red_right_1, flip_x: true }
+    red_hit: { sprite: _sheet, x: 236, y: 210, width: 35, height: 41 }
+    red_fall_1: { sprite: _sheet, x: 279, y: 210, width: 22, height: 41 }
 
 # =============================================================================
 # Entity Types

@@ -310,6 +310,10 @@
         {
           "type": "object",
           "properties": {
+            "sprite": {
+              "type": "string",
+              "description": "Inherit from another sprite definition, overriding specified fields"
+            },
             "file": {
               "type": "string",
               "description": "File path or @reference (e.g., @ducks_sheet)"
