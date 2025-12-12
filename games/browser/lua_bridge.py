@@ -1,12 +1,12 @@
 """
-Browser Lua Bridge - Routes Lua execution through JavaScript WASMOON.
+Browser Lua Bridge - Routes Lua execution through JavaScript Fengari.
 
 This module provides LuaEngineBrowser, a drop-in replacement for LuaEngine
-that executes Lua code in JavaScript via WASMOON. Game state is serialized
-to JavaScript before Lua execution and changes are applied after.
+that executes Lua code in JavaScript via Fengari (pure JS Lua 5.3). Game state
+is serialized to JavaScript before Lua execution and changes are applied after.
 
 Architecture:
-    Python (GameEngine)     JavaScript (WASMOON)
+    Python (GameEngine)     JavaScript (Fengari)
            │                        │
            │  serialize_state()     │
            │ ──────────────────────>│
@@ -20,7 +20,8 @@ Architecture:
            │                        │
 
 This avoids async back-and-forth during Lua execution - all ams.* calls
-operate on a local snapshot in JavaScript.
+operate on a local snapshot in JavaScript. Fengari is synchronous, unlike
+WASMOON, which means cleaner execution flow and no memory corruption issues.
 """
 
 import json
@@ -152,7 +153,7 @@ class ScheduledCallback:
 
 class LuaEngineBrowser:
     """
-    Browser-compatible Lua engine using WASMOON via JavaScript.
+    Browser-compatible Lua engine using Fengari via JavaScript.
 
     Provides the same interface as native LuaEngine but executes Lua
     in JavaScript. State is serialized before execution and changes
@@ -197,20 +198,20 @@ class LuaEngineBrowser:
             # Create API but it won't be used - JS has its own implementation
             pass
 
-        # Initialize WASMOON in JavaScript
-        self._init_wasmoon()
+        # Initialize Fengari in JavaScript
+        self._init_fengari()
 
     @property
     def api(self):
         """Get API instance (for compatibility)."""
         return self._api
 
-    def _init_wasmoon(self) -> None:
-        """Initialize WASMOON in JavaScript."""
+    def _init_fengari(self) -> None:
+        """Initialize Fengari in JavaScript."""
         if sys.platform != "emscripten":
             return
 
-        js_log("[LuaEngineBrowser] Initializing WASMOON...")
+        js_log("[LuaEngineBrowser] Initializing Fengari...")
 
         # Send init message to JavaScript
         self._send_to_js('lua_init', {

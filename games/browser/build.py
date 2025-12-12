@@ -46,7 +46,7 @@ BROWSER_GAMES = [
     "ManyTargets",
 ]
 
-# YAML-only games (use GameEngine, require WASMOON for Lua behaviors)
+# YAML-only games (use GameEngine, require Fengari for Lua behaviors)
 # These are the "NG" (Next Generation) versions using game.yaml
 # SweetPhysicsNG excluded - pymunk not available in WASM
 YAML_GAMES = [
@@ -277,7 +277,7 @@ def _copy_ams_modules(output_dir: Path):
 
     # Create __init__.py that redirects engine to browser version
     (lua_dst / "__init__.py").write_text(
-        '"""Browser Lua module - uses WASMOON via JavaScript."""\n'
+        '"""Browser Lua module - uses Fengari via JavaScript."""\n'
         'from lua_bridge import LuaEngineBrowser as LuaEngine\n'
         'from lua_bridge import EntityBrowser as Entity\n'
     )
@@ -293,11 +293,11 @@ def _copy_ams_modules(output_dir: Path):
         )
         print(f"  Copied: ams/games/ (entire package)")
 
-    # Copy WASMOON JavaScript bridge
-    wasmoon_js = BROWSER_DIR / "wasmoon_bridge.js"
-    if wasmoon_js.exists():
-        shutil.copy2(wasmoon_js, output_dir / "wasmoon_bridge.js")
-        print(f"  Copied: wasmoon_bridge.js")
+    # Copy Fengari JavaScript bridge (replaces WASMOON)
+    fengari_js = BROWSER_DIR / "fengari_bridge.js"
+    if fengari_js.exists():
+        shutil.copy2(fengari_js, output_dir / "fengari_bridge.js")
+        print(f"  Copied: fengari_bridge.js")
 
     # Create root-level lua/ directory for subroutine loading
     # Engine looks for lua/{type}/ at ContentFS root, which maps to working directory
@@ -328,17 +328,93 @@ def _ensure_init_files(output_dir: Path):
                 init_file.touch()
 
 
-def _copy_static_assets(output_dir: Path):
+def _patch_pygbag_index(served_dir: Path, build_id: str = "unknown"):
+    """Patch pygbag's index.html with early error handlers.
+
+    This injects error capture code BEFORE pythons.js loads, ensuring
+    we can capture WASM errors that pythons.js might swallow.
+    """
+    index_path = served_dir / "index.html"
+    if not index_path.exists():
+        return
+
+    content = index_path.read_text()
+
+    # Skip if already patched
+    if "AMS_EARLY_ERROR_CAPTURE" in content:
+        return
+
+    # Early error handler script - runs before any other scripts
+    early_handler = f'''<script>
+    // AMS_EARLY_ERROR_CAPTURE - Capture errors before pythons.js
+    (function() {{
+        window.AMS_BUILD_ID = '{build_id}';
+        window.AMS_EARLY_ERRORS = [];
+
+        // Capture unhandled rejections (WASM errors appear here)
+        window.addEventListener('unhandledrejection', function(event) {{
+            var err = {{
+                type: 'unhandledrejection',
+                message: event.reason?.message || String(event.reason),
+                stack: event.reason?.stack || 'no stack',
+                name: event.reason?.name || 'UnhandledRejection',
+                timestamp: new Date().toISOString()
+            }};
+            window.AMS_EARLY_ERRORS.push(err);
+            console.error('[AMS_EARLY]', err);
+
+            // Stream to log server if available
+            if (window.AMS_streamLog) {{
+                window.AMS_streamLog('ERROR', 'early_unhandled_rejection', JSON.stringify(err));
+            }}
+        }});
+
+        // Capture global errors
+        window.addEventListener('error', function(event) {{
+            var err = {{
+                type: 'error',
+                message: event.message,
+                filename: event.filename,
+                lineno: event.lineno,
+                colno: event.colno,
+                timestamp: new Date().toISOString()
+            }};
+            window.AMS_EARLY_ERRORS.push(err);
+            console.error('[AMS_EARLY]', err);
+
+            if (window.AMS_streamLog) {{
+                window.AMS_streamLog('ERROR', 'early_error', JSON.stringify(err));
+            }}
+        }});
+    }})();
+    </script>
+'''
+
+    # Insert at the start of the document
+    # pygbag doesn't use standard <head>, so insert right after <html...>
+    import re
+    html_match = re.search(r'(<html[^>]*>)', content)
+    if html_match:
+        insert_pos = html_match.end()
+        content = content[:insert_pos] + "\n" + early_handler + content[insert_pos:]
+        index_path.write_text(content)
+        print(f"  Patched index.html with early error handlers")
+
+
+def _copy_static_assets(output_dir: Path, build_id: str = "unknown"):
     """Copy static assets to pygbag's served directory."""
     served_dir = output_dir / "build" / "web"
     if not served_dir.exists():
         served_dir.mkdir(parents=True)
 
-    # Copy wasmoon_bridge.js to served directory
-    wasmoon_src = output_dir / "wasmoon_bridge.js"
-    if wasmoon_src.exists():
-        shutil.copy2(wasmoon_src, served_dir / "wasmoon_bridge.js")
-        print(f"  Copied wasmoon_bridge.js to served directory")
+    # Patch pygbag's index.html with early error handlers
+    _patch_pygbag_index(served_dir, build_id)
+
+    # Copy fengari_bridge.js to served directory
+    fengari_src = output_dir / "fengari_bridge.js"
+    if fengari_src.exists():
+        shutil.copy2(fengari_src, served_dir / "fengari_bridge.js")
+        print(f"  Copied fengari_bridge.js to served directory")
 
     # Copy launcher.html to served directory
     launcher_src = output_dir / "launcher.html"
@@ -353,8 +429,12 @@ def run_dev_server(output_dir: Path, port: int = 8000):
     print(f"\nStarting development server on port {port}...")
     print(f"Open: http://localhost:{port}\n")
 
+    # Read build_id for error handler injection
+    build_id_file = output_dir / "build_id.txt"
+    build_id = build_id_file.read_text().strip() if build_id_file.exists() else "unknown"
+
     # Copy static assets to served directory before starting
-    _copy_static_assets(output_dir)
+    _copy_static_assets(output_dir, build_id)
 
     cmd = f"{pygbag} --port {port} {output_dir}"
     subprocess.run(cmd, shell=True, cwd=PROJECT_ROOT)
@@ -368,8 +448,12 @@ def build_production(output_dir: Path):
     cmd = f"{pygbag} --build --app_name ams_games {output_dir}"
     result = subprocess.run(cmd, shell=True, cwd=PROJECT_ROOT)
 
+    # Read build_id for error handler injection
+    build_id_file = output_dir / "build_id.txt"
+    build_id = build_id_file.read_text().strip() if build_id_file.exists() else "unknown"
+
     # Copy static assets after pygbag creates the build directory
-    _copy_static_assets(output_dir)
+    _copy_static_assets(output_dir, build_id)
 
     if result.returncode == 0:
         print(f"\nBuild complete!")
@@ -400,7 +484,7 @@ GAME_INFO = {
 }
 
 
-def create_index_html(output_dir: Path):
+def create_index_html(output_dir: Path, build_id: str = "unknown"):
     """Create a custom index.html with game selector."""
     # Generate game cards from all games (BaseGame + YAML)
     all_games = BROWSER_GAMES + YAML_GAMES
@@ -510,6 +594,10 @@ def create_index_html(output_dir: Path):
             background: #16213e;
         }}
     </style>
+    <script>
+        // Build ID for log correlation
+        window.AMS_BUILD_ID = '{build_id}';
+    </script>
 </head>
 <body>
     <div class="container" id="selector">
@@ -587,7 +675,7 @@ def main():
     (args.output / "build_id.txt").write_text(build_id)
     print(f"  Written: build_id.txt ({build_id})")
 
-    create_index_html(args.output)
+    create_index_html(args.output, build_id)
 
     if args.dev:
         run_dev_server(args.output, args.port)

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WASMOON Sandbox Test Rig</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            margin: 0;
+        }
+        h1 { color: #569cd6; }
+        h2 { color: #4ec9b0; margin-top: 30px; }
+        .test-section {
+            background: #252526;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 3px solid #569cd6;
+        }
+        .pass { color: #4ec9b0; }
+        .fail { color: #f14c4c; }
+        .warn { color: #cca700; }
+        .info { color: #3794ff; }
+        pre {
+            background: #1e1e1e;
+            padding: 10px;
+            overflow-x: auto;
+            border: 1px solid #3c3c3c;
+        }
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        button:hover { background: #1177bb; }
+        #output {
+            white-space: pre-wrap;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .lua-input {
+            width: 100%;
+            height: 100px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border: 1px solid #3c3c3c;
+            padding: 10px;
+            font-family: monospace;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>WASMOON Sandbox Test Rig</h1>
+    <p>Testing WASMOON (Lua 5.4 in WebAssembly) sandbox behavior</p>
+
+    <div class="test-section">
+        <button onclick="runAllTests()">Run All Tests</button>
+        <button onclick="clearOutput()">Clear Output</button>
+    </div>
+
+    <h2>Test Output</h2>
+    <div class="test-section">
+        <pre id="output">Click "Run All Tests" to begin...</pre>
+    </div>
+
+    <h2>Interactive Lua Console</h2>
+    <div class="test-section">
+        <textarea id="lua-code" class="lua-input" placeholder="Enter Lua code here...">print("Hello from Lua!")
+return 42</textarea>
+        <br>
+        <button onclick="runLuaCode()">Execute</button>
+        <button onclick="document.getElementById('lua-code').value = ''">Clear</button>
+    </div>
+
+    <h2>Quick Tests</h2>
+    <div class="test-section">
+        <button onclick="testGlobal('print')">Test print</button>
+        <button onclick="testGlobal('type')">Test type</button>
+        <button onclick="testGlobal('pairs')">Test pairs</button>
+        <button onclick="testGlobal('setmetatable')">Test setmetatable</button>
+        <button onclick="testGlobal('load')">Test load</button>
+        <button onclick="testGlobal('_G')">Test _G</button>
+        <button onclick="testGlobal('_ENV')">Test _ENV</button>
+        <button onclick="testGlobalPersistence()">Test Global Persistence</button>
+        <button onclick="testFunctionCapture()">Test Function _ENV Capture</button>
+    </div>
+
+    <script type="module">
+        // Import WASMOON
+        import { LuaFactory } from 'https://cdn.jsdelivr.net/npm/wasmoon@1.16.0/+esm';
+
+        let luaEngine = null;
+        let factory = null;
+
+        // Make functions available globally
+        window.log = log;
+        window.runAllTests = runAllTests;
+        window.clearOutput = clearOutput;
+        window.runLuaCode = runLuaCode;
+        window.testGlobal = testGlobal;
+        window.testGlobalPersistence = testGlobalPersistence;
+        window.testFunctionCapture = testFunctionCapture;
+
+        function log(msg, type = 'info') {
+            const output = document.getElementById('output');
+            const span = document.createElement('span');
+            span.className = type;
+            span.textContent = msg + '\n';
+            output.appendChild(span);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+        }
+
+        async function initWasmoon() {
+            if (luaEngine) return luaEngine;
+
+            log('Initializing WASMOON...', 'info');
+            try {
+                factory = new LuaFactory();
+                luaEngine = await factory.createEngine();
+                log('WASMOON initialized successfully!', 'pass');
+                return luaEngine;
+            } catch (err) {
+                log('Failed to initialize WASMOON: ' + err.message, 'fail');
+                throw err;
+            }
+        }
+
+        async function runLuaCode() {
+            const code = document.getElementById('lua-code').value;
+            log('\n--- Executing Lua Code ---', 'info');
+            log('Code: ' + code.substring(0, 100) + (code.length > 100 ? '...' : ''), 'info');
+
+            try {
+                await initWasmoon();
+                const result = await luaEngine.doString(code);
+                log('Result: ' + JSON.stringify(result), 'pass');
+                log('Result type: ' + typeof result, 'info');
+            } catch (err) {
+                log('Error: ' + err.message, 'fail');
+            }
+        }
+
+        async function testGlobal(name) {
+            log(`\n--- Testing global: ${name} ---`, 'info');
+            try {
+                await initWasmoon();
+
+                // Method 1: Direct check via doString
+                try {
+                    const code = `if ${name} ~= nil then return "EXISTS" else return "NIL" end`;
+                    const result = await luaEngine.doString(code);
+                    log(`  doString check: ${result}`, result === 'EXISTS' ? 'pass' : 'warn');
+                } catch (e) {
+                    log(`  doString check failed: ${e.message}`, 'fail');
+                }
+
+                // Method 2: Using luaEngine.global.get
+                try {
+                    const val = luaEngine.global.get(name);
+                    log(`  global.get: ${val === null ? 'null' : typeof val}`, val !== null ? 'pass' : 'warn');
+                } catch (e) {
+                    log(`  global.get failed: ${e.message}`, 'fail');
+                }
+
+            } catch (err) {
+                log(`  Test failed: ${err.message}`, 'fail');
+            }
+        }
+
+        async function testGlobalPersistence() {
+            log('\n--- Testing Global Persistence Across doString Calls ---', 'info');
+            try {
+                await initWasmoon();
+
+                // Set a global in one call
+                log('  Setting _test_var = 12345...', 'info');
+                await luaEngine.doString('_test_var = 12345');
+
+                // Try to read it in another call
+                log('  Reading _test_var in new doString...', 'info');
+                const result = await luaEngine.doString('return _test_var');
+                log(`  Result: ${result}`, result === 12345 ? 'pass' : 'fail');
+
+                // Also test via global.get
+                const globalVal = luaEngine.global.get('_test_var');
+                log(`  global.get('_test_var'): ${globalVal}`, globalVal === 12345 ? 'pass' : 'fail');
+
+            } catch (err) {
+                log(`  Test failed: ${err.message}`, 'fail');
+            }
+        }
+
+        async function testFunctionCapture() {
+            log('\n--- Testing Function _ENV Capture ---', 'info');
+            try {
+                await initWasmoon();
+
+                // Define a function that uses a global
+                log('  Defining function that accesses global...', 'info');
+                await luaEngine.doString(`
+                    _shared_value = 999
+                    function test_func()
+                        return _shared_value
+                    end
+                `);
+
+                // Call the function from a new doString
+                log('  Calling function from new doString...', 'info');
+                const result = await luaEngine.doString('return test_func()');
+                log(`  Result: ${result}`, result === 999 ? 'pass' : 'fail');
+
+                // Test with closure that captures upvalue
+                log('  Testing closure with captured upvalue...', 'info');
+                await luaEngine.doString(`
+                    local captured = 777
+                    function closure_test()
+                        return captured
+                    end
+                `);
+                const closureResult = await luaEngine.doString('return closure_test()');
+                log(`  Closure result: ${closureResult}`, closureResult === 777 ? 'pass' : 'fail');
+
+            } catch (err) {
+                log(`  Test failed: ${err.message}`, 'fail');
+            }
+        }
+
+        async function runAllTests() {
+            clearOutput();
+            log('=== WASMOON SANDBOX TEST RIG ===\n', 'info');
+
+            // Initialize
+            try {
+                await initWasmoon();
+            } catch (e) {
+                return;
+            }
+
+            // Test 1: Basic globals
+            log('\n=== TEST 1: BASIC GLOBALS ===', 'info');
+            const basicGlobals = ['print', 'type', 'tostring', 'tonumber', 'pairs', 'ipairs', 'next'];
+            for (const g of basicGlobals) {
+                await testGlobal(g);
+            }
+
+            // Test 2: Table/metatable functions
+            log('\n=== TEST 2: TABLE FUNCTIONS ===', 'info');
+            const tableGlobals = ['table', 'setmetatable', 'getmetatable', 'rawget', 'rawset'];
+            for (const g of tableGlobals) {
+                await testGlobal(g);
+            }
+
+            // Test 3: Other important globals
+            log('\n=== TEST 3: OTHER GLOBALS ===', 'info');
+            const otherGlobals = ['math', 'string', 'load', 'pcall', 'error', 'assert', 'select', 'unpack', '_G', '_ENV'];
+            for (const g of otherGlobals) {
+                await testGlobal(g);
+            }
+
+            // Test 4: Global persistence
+            log('\n=== TEST 4: GLOBAL PERSISTENCE ===', 'info');
+            await testGlobalPersistence();
+
+            // Test 5: Function capture
+            log('\n=== TEST 5: FUNCTION _ENV CAPTURE ===', 'info');
+            await testFunctionCapture();
+
+            // Test 6: luaEngine.global API
+            log('\n=== TEST 6: luaEngine.global API ===', 'info');
+            try {
+                log('  Setting global via JS: luaEngine.global.set("js_set_var", 42)', 'info');
+                luaEngine.global.set('js_set_var', 42);
+
+                log('  Reading via doString...', 'info');
+                const result = await luaEngine.doString('return js_set_var');
+                log(`  Result: ${result}`, result === 42 ? 'pass' : 'fail');
+            } catch (e) {
+                log(`  global.set test failed: ${e.message}`, 'fail');
+            }
+
+            // Test 7: Injecting a JS function into Lua
+            log('\n=== TEST 7: JS FUNCTION INJECTION ===', 'info');
+            try {
+                log('  Injecting JS function via global.set...', 'info');
+                luaEngine.global.set('js_callback', (x) => {
+                    console.log('[JS] Callback called with:', x);
+                    return x * 2;
+                });
+
+                log('  Calling from Lua...', 'info');
+                const result = await luaEngine.doString('return js_callback(21)');
+                log(`  Result: ${result}`, result === 42 ? 'pass' : 'fail');
+            } catch (e) {
+                log(`  JS function injection failed: ${e.message}`, 'fail');
+            }
+
+            log('\n=== ALL TESTS COMPLETE ===', 'info');
+        }
+
+        // Auto-init on load
+        initWasmoon().catch(e => log('Auto-init failed: ' + e.message, 'fail'));
+    </script>
+</body>
+</html>

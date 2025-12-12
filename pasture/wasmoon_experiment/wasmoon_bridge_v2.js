@@ -67,6 +67,173 @@
     // Response queue for Python to poll
     window.luaResponses = window.luaResponses || [];
 
+    // =========================================================================
+    // Remote Log Streaming (for debugging)
+    // =========================================================================
+    // Enable via URL param: ?logstream=true or window.AMS_LOGSTREAM = true
+    // Custom server: ?logserver=ws://host:port or window.AMS_LOGSERVER
+    let logSocket = null;
+    let logQueue = [];
+    let buildId = 'unknown';
+    let logStreamEnabled = false;
+
+    function getLogConfig() {
+        // Check URL params
+        const params = new URLSearchParams(window.location.search);
+
+        // Enable flag: ?logstream=true or ?logstream=1
+        let enabled = params.get('logstream');
+        if (enabled === null && typeof window.AMS_LOGSTREAM !== 'undefined') {
+            enabled = window.AMS_LOGSTREAM;
+        }
+        logStreamEnabled = enabled === 'true' || enabled === '1' || enabled === true;
+
+        // Server URL: ?logserver=ws://... or window.AMS_LOGSERVER
+        let server = params.get('logserver');
+        if (!server && typeof window.AMS_LOGSERVER !== 'undefined') {
+            server = window.AMS_LOGSERVER;
+        }
+        return server || 'ws://localhost:8001';
+    }
+
+    function initLogStream() {
+        const serverUrl = getLogConfig();
+
+        if (!logStreamEnabled) {
+            return; // Logging disabled
+        }
+
+        // Get build ID from the page if available
+        if (window.AMS_BUILD_ID) {
+            buildId = window.AMS_BUILD_ID;
+        }
+
+        // Try to connect to log server
+        try {
+            logSocket = new WebSocket(serverUrl);
+            logSocket.onopen = () => {
+                originalConsoleLog('[LogStream] Connected to', serverUrl);
+                // Flush queued logs
+                while (logQueue.length > 0) {
+                    const entry = logQueue.shift();
+                    logSocket.send(JSON.stringify(entry));
+                }
+            };
+            logSocket.onclose = () => {
+                originalConsoleLog('[LogStream] Disconnected');
+                logSocket = null;
+            };
+            logSocket.onerror = () => {
+                // Silent fail - log server may not be running
+                logSocket = null;
+            };
+        } catch (e) {
+            // WebSocket not available
+        }
+    }
+
+    function streamLog(level, source, message) {
+        if (!logStreamEnabled) return;
+
+        const entry = {
+            build_id: buildId,
+            level: level,
+            source: source,
+            message: message,
+        };
+
+        if (logSocket && logSocket.readyState === WebSocket.OPEN) {
+            logSocket.send(JSON.stringify(entry));
+        } else {
+            // Queue for later or just drop if queue is full
+            if (logQueue.length < 100) {
+                logQueue.push(entry);
+            }
+        }
+    }
+
+    // Save original console methods before any interception
+    const originalConsoleLog = console.log;
+    const originalConsoleWarn = console.warn;
+    const originalConsoleError = console.error;
+
+    function setupConsoleInterception() {
+        if (!logStreamEnabled) return;
+
+        console.log = function(...args) {
+            originalConsoleLog.apply(console, args);
+            streamLog('INFO', 'console', args.map(a => String(a)).join(' '));
+        };
+        console.warn = function(...args) {
+            originalConsoleWarn.apply(console, args);
+            streamLog('WARN', 'console', args.map(a => String(a)).join(' '));
+        };
+        console.error = function(...args) {
+            originalConsoleError.apply(console, args);
+            streamLog('ERROR', 'console', args.map(a => String(a)).join(' '));
+        };
+    }
+
+    // Global error handlers - always capture, stream if enabled
+    function setupGlobalErrorHandlers() {
+        // Catch synchronous errors
+        const originalOnError = window.onerror;
+        window.onerror = function(message, source, lineno, colno, error) {
+            const errorInfo = {
+                message: String(message),
+                source: source,
+                line: lineno,
+                col: colno,
+                stack: error?.stack || 'no stack'
+            };
+            originalConsoleError('[GlobalError]', errorInfo);
+            streamLog('ERROR', 'global_error', JSON.stringify(errorInfo));
+
+            // Call original handler if exists
+            if (originalOnError) {
+                return originalOnError.apply(this, arguments);
+            }
+            return false;
+        };
+
+        // Catch unhandled promise rejections (like WASM errors)
+        window.addEventListener('unhandledrejection', function(event) {
+            const reason = event.reason;
+            const errorInfo = {
+                message: reason?.message || String(reason),
+                stack: reason?.stack || 'no stack',
+                type: reason?.name || 'UnhandledRejection'
+            };
+            originalConsoleError('[UnhandledRejection]', errorInfo);
+            streamLog('ERROR', 'unhandled_rejection', JSON.stringify(errorInfo));
+        });
+
+        // Catch errors from WASM specifically
+        window.addEventListener('error', function(event) {
+            if (event.message?.includes('wasm') || event.filename?.includes('wasm')) {
+                const errorInfo = {
+                    message: event.message,
+                    filename: event.filename,
+                    lineno: event.lineno,
+                    colno: event.colno,
+                    type: 'WASMError'
+                };
+                originalConsoleError('[WASMError]', errorInfo);
+                streamLog('ERROR', 'wasm_error', JSON.stringify(errorInfo));
+            }
+        });
+    }
+
+    // Initialize log stream on load
+    if (typeof window !== 'undefined') {
+        getLogConfig(); // Sets logStreamEnabled
+        setupGlobalErrorHandlers(); // Always capture errors
+        if (logStreamEnabled) {
+            setupConsoleInterception();
+            initLogStream();
+        }
+    }
+
     /**
      * Load WASMOON library dynamically
      */

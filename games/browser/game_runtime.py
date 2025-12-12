@@ -459,6 +459,15 @@ class BrowserGameRuntime:
         result_type = result.get('type', '')
         data = result.get('data', {})
 
+        # Handle Lua VM crash - stop the game loop
+        if result_type == 'lua_crashed':
+            error = data.get('error', 'Unknown error')
+            context = data.get('context', 'Unknown')
+            js_log(f"[BrowserGameRuntime] FATAL: Lua VM crashed in {context}: {error}")
+            js_log("[BrowserGameRuntime] Stopping game loop due to Lua crash")
+            self.running = False
+            return
+
         if not self.game:
             return
 
@@ -477,12 +486,12 @@ class BrowserGameRuntime:
             engine.apply_lua_results(data)
 
 
-def inject_wasmoon_scripts():
-    """Inject WASMOON scripts into the page (called once at startup)."""
+def inject_fengari_scripts():
+    """Inject Fengari scripts into the page (called once at startup)."""
     if sys.platform != "emscripten":
         return
 
-    js_log("[BrowserGameRuntime] Injecting WASMOON scripts...")
+    js_log("[BrowserGameRuntime] Injecting Fengari scripts...")
 
     try:
         # Initialize response arrays
@@ -491,27 +500,31 @@ def inject_wasmoon_scripts():
             if (!window.luaResponses) window.luaResponses = [];
         ''')
 
-        # Load WASMOON bridge (will load wasmoon library itself)
+        # Load Fengari bridge (will load fengari-web library itself)
         browser_platform.window.eval('''
             (function() {
-                if (window.wasmoonBridge) {
-                    console.log('[WASMOON] Already loaded');
+                if (window.fengariBridge) {
+                    console.log('[FENGARI] Already loaded');
                     return;
                 }
 
-                // Load our bridge which handles wasmoon loading
+                // Load our bridge which handles fengari loading
                 var bridge = document.createElement('script');
-                bridge.src = 'wasmoon_bridge.js';
+                bridge.src = 'fengari_bridge.js';
                 bridge.onload = function() {
-                    console.log('[WASMOON] Bridge script loaded');
+                    console.log('[FENGARI] Bridge script loaded');
                 };
                 bridge.onerror = function(e) {
-                    console.error('[WASMOON] Failed to load bridge:', e);
+                    console.error('[FENGARI] Failed to load bridge:', e);
                 };
                 document.head.appendChild(bridge);
             })();
         ''')
 
-        js_log("[BrowserGameRuntime] WASMOON script injection initiated")
+        js_log("[BrowserGameRuntime] Fengari script injection initiated")
     except Exception as e:
-        js_log(f"[BrowserGameRuntime] Error injecting WASMOON: {e}")
+        js_log(f"[BrowserGameRuntime] Error injecting Fengari: {e}")
+
+
+# Keep old name for backwards compatibility
+inject_wasmoon_scripts = inject_fengari_scripts
