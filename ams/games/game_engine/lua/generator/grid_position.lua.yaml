@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=../lua_script.schema.json
+type: generator
+name: grid_position
+description: |
+  Property generator that calculates pixel position from grid coordinates.
+
+  Computes: start + (index * spacing)
+version: "1.0"
+tags: [layout, position]
+
+args:
+  index:
+    type: int
+    description: Grid index (0-based or 1-based depending on usage)
+    required: true
+  start:
+    type: float
+    description: Starting pixel position
+    default: 0
+  spacing:
+    type: float
+    description: Pixels between grid cells
+    default: 0
+  axis:
+    type: string
+    description: Axis for documentation
+    enum: ["x", "y"]
+
+provides:
+  hooks:
+    - generate
+
+examples:
+  - title: X position in grid
+    yaml: |
+      x: {call: "grid_position", args: {axis: "x", index: 5, start: 65, spacing: 75}}
+
+  - title: Y position in grid
+    yaml: |
+      y: {call: "grid_position", args: {axis: "y", index: 2, start: 60, spacing: 30}}
+
+code: |
+  local grid_position = {}
+
+  function grid_position.generate(args)
+      -- args.index: Grid index (0-based or 1-based depending on usage)
+      -- args.start: Starting pixel position
+      -- args.spacing: Pixels between grid cells
+      -- args.axis: Optional, for documentation ("x" or "y")
+
+      local index = args.index or 0
+      local start = args.start or 0
+      local spacing = args.spacing or 0
+
+      return start + (index * spacing)
+  end
+
+  return grid_position

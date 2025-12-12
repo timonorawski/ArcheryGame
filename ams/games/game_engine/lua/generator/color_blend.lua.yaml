@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=../lua_script.schema.json
+type: generator
+name: color_blend
+description: |
+  Property generator that blends between two colors based on a factor.
+
+  Returns an RGB color array interpolated between two named colors.
+version: "1.0"
+tags: [visual, color]
+
+args:
+  from:
+    type: string
+    description: Starting color name
+    required: true
+    enum: ["red", "green", "blue", "yellow", "cyan", "magenta", "white", "black", "orange", "purple", "gray", "silver"]
+  to:
+    type: string
+    description: Ending color name
+    required: true
+    enum: ["red", "green", "blue", "yellow", "cyan", "magenta", "white", "black", "orange", "purple", "gray", "silver"]
+  factor:
+    type: float
+    description: Blend factor 0-1 (0 = from, 1 = to)
+    default: 0.5
+    min: 0
+    max: 1
+
+provides:
+  hooks:
+    - generate
+
+examples:
+  - title: Orange blend
+    yaml: |
+      color: {call: "color_blend", args: {from: "red", to: "yellow", factor: 0.5}}
+
+  - title: Random blend
+    yaml: |
+      color: {call: "color_blend", args: {from: "blue", to: "white", factor: {lua: "ams.random()"}}}
+
+code: |
+  local color_blend = {}
+
+  -- Color name to RGB lookup
+  local colors = {
+      red = {255, 0, 0},
+      green = {0, 255, 0},
+      blue = {0, 0, 255},
+      yellow = {255, 255, 0},
+      cyan = {0, 255, 255},
+      magenta = {255, 0, 255},
+      white = {255, 255, 255},
+      black = {0, 0, 0},
+      orange = {255, 165, 0},
+      purple = {128, 0, 128},
+      gray = {128, 128, 128},
+      silver = {192, 192, 192}
+  }
+
+  function color_blend.generate(args)
+      -- args.from: Starting color name
+      -- args.to: Ending color name
+      -- args.factor: Blend factor 0-1 (0 = from, 1 = to)
+
+      local from_color = colors[args.from] or colors.white
+      local to_color = colors[args.to] or colors.white
+      local factor = args.factor or 0.5
+
+      -- Clamp factor to 0-1
+      factor = math.max(0, math.min(1, factor))
+
+      -- Linear interpolation
+      local r = math.floor(from_color[1] + (to_color[1] - from_color[1]) * factor)
+      local g = math.floor(from_color[2] + (to_color[2] - from_color[2]) * factor)
+      local b = math.floor(from_color[3] + (to_color[3] - from_color[3]) * factor)
+
+      -- Return as table (will be converted to list by Python)
+      return {r, g, b}
+  end
+
+  return color_blend
