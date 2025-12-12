@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Created**: 2024-12-12
-**Updated**: 2024-12-12
+**Updated**: 2025-12-12
 
 ## Implementation Status
 
@@ -42,7 +42,7 @@
 
 ## Overview
 
-This document proposes a YAML format for Lua scripts that includes machine-readable metadata alongside the code. The format replaces raw `.lua` files with `.yaml` files that can be validated against a JSON Schema.
+This document specifies the YAML format for Lua scripts that includes machine-readable metadata alongside the code. The format replaces raw `.lua` files with `.lua.yaml` files that can be validated against a JSON Schema. All engine scripts have been migrated to this format.
 
 ## Goals
 
@@ -328,11 +328,13 @@ These are loaded after file-based scripts, allowing overrides.
 3. `type` is inferred from which `inline_*` section contains it
 4. All other fields follow the subset rules above
 
-## Migration Path
+## Migration Status
 
-1. **Phase 1**: Add YAML loader that can read both `.lua` and `.lua.yaml` files
-2. **Phase 2**: Convert engine scripts to `.lua.yaml` format
-3. **Phase 3**: Update documentation and examples
+Migration is **complete**. All phases have been successfully implemented:
+
+1. **Phase 1** ✅: YAML loader (`ScriptLoader`) reads both `.lua` and `.lua.yaml` files
+2. **Phase 2** ✅: All 20 engine scripts converted to `.lua.yaml` format, legacy `.lua` files removed
+3. **Phase 3** ✅: Documentation updated, schema files created
 
 ## Decisions
 
