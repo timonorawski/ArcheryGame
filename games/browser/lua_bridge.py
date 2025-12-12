@@ -304,16 +304,63 @@ class LuaEngineBrowser:
         return True
 
     def load_subroutines_from_dir(self, sub_type: str, content_dir: str) -> int:
-        """Load all .lua files from a directory."""
+        """Load all Lua subroutines from a directory.
+
+        Supports multiple formats (in order of preference):
+        1. .lua.json - JSON wrapper with code field (browser build from .lua.yaml)
+        2. .lua - Raw Lua files (legacy format)
+        """
         count = 0
-        if self._content_fs.exists(content_dir):
-            for item in self._content_fs.listdir(content_dir):
-                if item.endswith('.lua'):
-                    name = item[:-4]
-                    content_path = f'{content_dir}/{item}'
-                    if self.load_subroutine(sub_type, name, content_path):
-                        count += 1
+        seen_names: set = set()
+
+        if not self._content_fs.exists(content_dir):
+            return 0
+
+        items = self._content_fs.listdir(content_dir)
+
+        # First pass: .lua.json files (preferred - have metadata from .lua.yaml)
+        for item in items:
+            if item.endswith('.lua.json'):
+                name = item[:-9]  # Remove .lua.json
+                if name in seen_names:
+                    continue
+                content_path = f'{content_dir}/{item}'
+                if self._load_json_subroutine(sub_type, name, content_path):
+                    seen_names.add(name)
+                    count += 1
+
+        # Second pass: .lua files (only if no .lua.json version exists)
+        for item in items:
+            if item.endswith('.lua') and not item.endswith('.lua.json'):
+                name = item[:-4]  # Remove .lua
+                if name in seen_names:
+                    continue
+                content_path = f'{content_dir}/{item}'
+                if self.load_subroutine(sub_type, name, content_path):
+                    seen_names.add(name)
+                    count += 1
+
         return count
+
+    def _load_json_subroutine(self, sub_type: str, name: str, content_path: str) -> bool:
+        """Load a Lua subroutine from a .lua.json file (converted from .lua.yaml)."""
+        if name in self._subroutines[sub_type]:
+            return True
+
+        try:
+            json_text = self._content_fs.readtext(content_path)
+            data = json.loads(json_text)
+
+            # Extract the code field from the JSON wrapper
+            code = data.get('code')
+            if not code:
+                js_log(f"[LuaEngineBrowser] No code field in {content_path}")
+                return False
+
+            return self._send_subroutine_to_js(sub_type, name, code)
+        except Exception as e:
+            js_log(f"[LuaEngineBrowser] Error loading JSON subroutine {sub_type}/{name}: {e}")
+            return False
 
     def get_subroutine(self, sub_type: str, name: str) -> Optional[Any]:
         """Check if subroutine is loaded (returns truthy for compat)."""

@@ -1,6 +1,6 @@
 # Lua Script YAML Format Specification
 
-**Status**: Partially Implemented
+**Status**: Complete
 **Created**: 2024-12-12
 **Updated**: 2024-12-12
 
@@ -12,34 +12,31 @@
 | JSON Schema (inline) | **Done** | `ams/games/game_engine/lua/lua_script_inline.schema.json` |
 | ScriptLoader class | **Done** | `ams/games/game_engine/lua/script_loader.py` |
 | ScriptMetadata dataclass | **Done** | `ams/games/game_engine/lua/script_loader.py` |
-| `.lua.yaml` file support | **Done** | `LuaEngine.load_subroutines_from_dir()` prefers `.lua.yaml` over `.lua` |
+| `.lua.yaml` file support | **Done** | `LuaEngine.load_subroutines_from_dir()` loads `.lua.yaml` files |
 | Engine integration | **Done** | `LuaEngine._load_yaml_subroutine()` uses ScriptLoader |
 | Inline scripts in game.yaml | **Done** | `GameEngine._load_inline_scripts()` parses `inline_*` sections |
 | game.schema.json integration | **Done** | References `lua_script_inline.schema.json` for validation |
-| Convert scripts to `.lua.yaml` | **In Progress** | `gravity.lua.yaml` created as proof-of-concept |
+| Browser JSON support | **Done** | `LuaEngineBrowser` loads `.lua.json` files (converted from `.lua.yaml`) |
+| All scripts migrated | **Done** | Legacy `.lua` files removed |
 
 ### Current Script Inventory
 
-**Converted to `.lua.yaml` format** (1 file):
-- `gravity.lua.yaml` - proof-of-concept with full metadata
-
-**Behaviors** (14 remaining in legacy `.lua` format):
-- `animate.lua`, `ball.lua`, `bounce.lua`, `brick.lua`, `descend.lua`
-- `destroy_offscreen.lua`, `fade_out.lua`, `follow_parent.lua`
-- `oscillate.lua`, `paddle.lua`, `projectile.lua`, `rope_link.lua`, `shoot.lua`
+**Behaviors** (14 files in `ams/games/game_engine/lua/behavior/`):
+- `animate.lua.yaml`, `ball.lua.yaml`, `bounce.lua.yaml`, `brick.lua.yaml`
+- `descend.lua.yaml`, `destroy_offscreen.lua.yaml`, `fade_out.lua.yaml`
+- `follow_parent.lua.yaml`, `gravity.lua.yaml`, `oscillate.lua.yaml`
+- `paddle.lua.yaml`, `projectile.lua.yaml`, `rope_link.lua.yaml`, `shoot.lua.yaml`
 
 **Collision Actions** (4 files in `ams/games/game_engine/lua/collision_action/`):
-- `bounce_paddle.lua`, `bounce_reflect.lua`, `hit_player.lua`, `take_damage.lua`
+- `bounce_paddle.lua.yaml`, `bounce_reflect.lua.yaml`, `hit_player.lua.yaml`, `take_damage.lua.yaml`
 
 **Generators** (2 files in `ams/games/game_engine/lua/generator/`):
-- `color_blend.lua`, `grid_position.lua`
+- `color_blend.lua.yaml`, `grid_position.lua.yaml`
 
-### Next Steps
+### Build Pipeline
 
-1. ~~**Convert one script** - Create `gravity.lua.yaml` as proof-of-concept~~ **Done**
-2. **Test the pipeline** - Run a game using `gravity` behavior to verify `.lua.yaml` loads
-3. **Test inline scripts** - Add an inline behavior to a game.yaml and verify it loads
-4. **Migrate remaining scripts** - Convert high-value scripts (bounce, animate) to `.lua.yaml`
+1. **Native (Python)**: `LuaEngine` loads `.lua.yaml` files directly via ScriptLoader
+2. **Browser (WebAssembly)**: `build.py` converts `.lua.yaml` → `.lua.json`, `LuaEngineBrowser` extracts `code` field
 
 ---
 
@@ -350,15 +347,16 @@ These are loaded after file-based scripts, allowing overrides.
 
 | File | Status | Purpose |
 |------|--------|---------|
-| `ams/games/game_engine/lua/lua_script.schema.json` | **Exists** | JSON Schema for `.lua.yaml` file validation |
-| `ams/games/game_engine/lua/lua_script_inline.schema.json` | **Exists** | JSON Schema for inline scripts in game.yaml |
-| `ams/games/game_engine/lua/script_loader.py` | **Exists** | ScriptLoader class and ScriptMetadata |
-| `ams/games/game_engine/schemas/game.schema.json` | **Updated** | References inline schema for `inline_*` sections |
-| `ams/lua/engine.py` | **Updated** | `load_subroutines_from_dir()` supports `.lua.yaml` |
-| `ams/games/game_engine/engine.py` | **Updated** | `_load_inline_scripts()` parses inline sections |
-| `ams/games/game_engine/lua/behavior/gravity.lua.yaml` | **Created** | Proof-of-concept converted behavior |
-| `ams/games/game_engine/lua/behavior/*.lua.yaml` | Pending | Remaining behavior scripts |
-| `ams/games/game_engine/lua/collision_action/*.lua.yaml` | Not created | Converted collision_action scripts |
+| `ams/games/game_engine/lua/lua_script.schema.json` | **Done** | JSON Schema for `.lua.yaml` file validation |
+| `ams/games/game_engine/lua/lua_script_inline.schema.json` | **Done** | JSON Schema for inline scripts in game.yaml |
+| `ams/games/game_engine/lua/script_loader.py` | **Done** | ScriptLoader class and ScriptMetadata |
+| `ams/games/game_engine/schemas/game.schema.json` | **Done** | References inline schema for `inline_*` sections |
+| `ams/lua/engine.py` | **Done** | Loads `.lua.yaml` files via ScriptLoader |
+| `ams/games/game_engine/engine.py` | **Done** | `_load_inline_scripts()` parses inline sections |
+| `games/browser/lua_bridge.py` | **Done** | Loads `.lua.json` files in browser (converted from `.lua.yaml`) |
+| `ams/games/game_engine/lua/behavior/*.lua.yaml` | **Done** | All 14 behavior scripts migrated |
+| `ams/games/game_engine/lua/collision_action/*.lua.yaml` | **Done** | All 4 collision action scripts migrated |
+| `ams/games/game_engine/lua/generator/*.lua.yaml` | **Done** | All 2 generator scripts migrated |
 
 ## Example: Full Behavior
 
