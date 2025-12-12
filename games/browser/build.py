@@ -234,13 +234,17 @@ def _copy_game_files(output_dir: Path):
     # Copy AMS modules for YAML game support
     _copy_ams_modules(output_dir)
 
-    # Convert YAML level files to JSON (PyYAML not available in WASM)
+    # Convert YAML files to JSON (PyYAML not available in WASM)
     print("  Converting YAML files to JSON...")
     _convert_yaml_to_json(games_dst)
     # Also convert YAML in ams dir
     ams_dst = output_dir / "ams"
     if ams_dst.exists():
         _convert_yaml_to_json(ams_dst)
+    # Also convert YAML in root lua/ dir (Lua script .lua.yaml files)
+    lua_dst = output_dir / "lua"
+    if lua_dst.exists():
+        _convert_yaml_to_json(lua_dst)
 
 
 def _copy_ams_modules(output_dir: Path):
