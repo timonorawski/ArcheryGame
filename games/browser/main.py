@@ -103,6 +103,28 @@ async def main():
     js_log("[main.py] BrowserGameRuntime created, calling load_game...")
     await runtime.load_game(game_slug, level=level_slug, level_group=level_group)
     js_log("[main.py] load_game complete, starting run loop...")
+
+    # Signal to IDE that engine is ready (game loaded, about to start loop)
+    if sys.platform == "emscripten":
+        try:
+            import platform as browser_platform
+            # Wait briefly for IDE bridge to load (injected in inject_fengari_scripts)
+            for _ in range(20):  # Max 2 seconds
+                if hasattr(browser_platform.window, 'ideBridge'):
+                    break
+                await asyncio.sleep(0.1)
+
+            if hasattr(browser_platform.window, 'ideBridge'):
+                browser_platform.window.ideBridge.sendToIDE('ready', {
+                    'game': game_slug,
+                    'engineReady': True
+                })
+                js_log("[main.py] Sent engine ready signal to IDE")
+            else:
+                js_log("[main.py] IDE bridge not available (standalone mode)")
+        except Exception as e:
+            js_log(f"[main.py] Could not send ready signal: {e}")
+
     await runtime.run()
 
     pygame.quit()

@@ -2,13 +2,14 @@
 """
 Simple development web server for YAMS browser builds.
 
-Serves static files from /app with:
+Serves static files from the pygbag build output with:
 - Proper MIME types (especially for .mjs, .wasm)
 - CORS headers for development
 - Directory listing
 """
 
 import mimetypes
+import os
 from pathlib import Path
 
 from aiohttp import web
@@ -20,7 +21,10 @@ mimetypes.add_type('application/json', '.json')
 mimetypes.add_type('text/yaml', '.yaml')
 mimetypes.add_type('text/yaml', '.yml')
 
-ROOT = Path('/app')
+# Serve from pygbag build output
+# The build script creates files at {BUILD_DIR}/build/web/
+BUILD_DIR = os.environ.get('BUILD_DIR', '/build/web')
+ROOT = Path(BUILD_DIR) / 'build' / 'web'
 
 
 async def cors_middleware(app, handler):
@@ -88,4 +92,7 @@ def create_app():
 if __name__ == '__main__':
     print('YAMS Dev Server starting on http://0.0.0.0:8000')
     print(f'Serving files from: {ROOT}')
+    if not ROOT.exists():
+        print(f'WARNING: Root directory does not exist yet: {ROOT}')
+        print('Build may still be in progress...')
     web.run_app(create_app(), host='0.0.0.0', port=8000, print=None)

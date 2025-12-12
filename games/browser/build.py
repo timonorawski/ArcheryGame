@@ -301,6 +301,12 @@ def _copy_ams_modules(output_dir: Path):
         shutil.copy2(fengari_js, output_dir / "fengari_bridge.js")
         print(f"  Copied: fengari_bridge.js")
 
+    # Copy IDE bridge JavaScript (IDE ↔ Engine communication)
+    ide_js = BROWSER_DIR / "ide_bridge.js"
+    if ide_js.exists():
+        shutil.copy2(ide_js, output_dir / "ide_bridge.js")
+        print(f"  Copied: ide_bridge.js")
+
     # Create root-level lua/ directory for subroutine loading
     # Engine looks for lua/{type}/ at ContentFS root, which maps to working directory
     lua_root_dst = output_dir / "lua"
@@ -331,19 +337,38 @@ def _ensure_init_files(output_dir: Path):
 
 
 def _patch_pygbag_index(served_dir: Path, build_id: str = "unknown"):
-    """Patch pygbag's index.html with early error handlers.
+    """Patch pygbag's index.html with early error handlers and CDN fix.
 
     This injects error capture code BEFORE pythons.js loads, ensuring
     we can capture WASM errors that pythons.js might swallow.
+
+    Also adds data-cdn attribute to force CDN-only mode, preventing
+    pythons.js from trying to load from localhost:8000 when running
+    behind a reverse proxy.
     """
+    import re
+
     index_path = served_dir / "index.html"
     if not index_path.exists():
         return
 
     content = index_path.read_text()
 
-    # Skip if already patched
+    # Force CDN-only mode by adding data-cdn attribute to pythons.js script tag
+    # This prevents pythons.js from trying localhost:8000 when behind nginx proxy
+    CDN_URL = "https://pygame-web.github.io/archives/0.9/"
+    if 'data-cdn=' not in content:
+        # Add data-cdn attribute to the pythons.js script tag
+        content = re.sub(
+            r'(<script\s+src="[^"]*pythons\.js"[^>]*)(>)',
+            rf'\1 data-cdn="{CDN_URL}"\2',
+            content
+        )
+        print(f"  Added data-cdn attribute to force CDN-only mode")
+
+    # Skip error handler injection if already patched
     if "AMS_EARLY_ERROR_CAPTURE" in content:
+        index_path.write_text(content)
         return
 
     # Early error handler script - runs before any other scripts
@@ -394,7 +419,6 @@ def _patch_pygbag_index(served_dir: Path, build_id: str = "unknown"):
 
     # Insert at the start of the document
     # pygbag doesn't use standard <head>, so insert right after <html...>
-    import re
     html_match = re.search(r'(<html[^>]*>)', content)
     if html_match:
         insert_pos = html_match.end()
@@ -417,6 +441,12 @@ def _copy_static_assets(output_dir: Path, build_id: str = "unknown"):
     if fengari_src.exists():
         shutil.copy2(fengari_src, served_dir / "fengari_bridge.js")
         print(f"  Copied fengari_bridge.js to served directory")
+
+    # Copy ide_bridge.js to served directory
+    ide_src = output_dir / "ide_bridge.js"
+    if ide_src.exists():
+        shutil.copy2(ide_src, served_dir / "ide_bridge.js")
+        print(f"  Copied ide_bridge.js to served directory")
 
     # Copy launcher.html to served directory
     launcher_src = output_dir / "launcher.html"

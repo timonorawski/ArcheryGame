@@ -8,6 +8,10 @@
     "build": "vite build",
     "preview": "vite preview"
   },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "monaco-editor": "^0.52.0"
+  },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^3.0.0",
     "svelte": "^4.2.0",

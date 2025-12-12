@@ -7,21 +7,23 @@
 #   docker compose down      # Stop all services
 #
 # Access:
-#   http://localhost:8080    # Web app (via nginx)
-#   ws://localhost:8080/ws   # Log WebSocket (via nginx)
-#   http://localhost:8080/api/logs  # Log API (via nginx)
+#   http://localhost:8000           # Web app (via nginx) - port 8000 for pygbag compatibility
+#   http://localhost:8000/author    # Game IDE/Editor
+#   ws://localhost:8000/ws          # Log WebSocket (via nginx)
+#   http://localhost:8000/api/logs  # Log API (via nginx)
 
 services:
   nginx:
     image: nginx:alpine
     ports:
-      - "${NGINX_PORT:-8080}:80"
+      - "${NGINX_PORT:-8000}:80"  # Port 8000 for pygbag CDN compatibility
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./docker/nginx/dev.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - web-server
       - log-server
+      - ide-server
     networks:
       - yams-dev
 
@@ -31,8 +33,11 @@ services:
       dockerfile: docker/web-server/Dockerfile
     volumes:
       - .:/app:ro
+      - pygbag-build:/build/web
     environment:
       - PYTHONUNBUFFERED=1
+      - BUILD_DIR=/build/web
+      # Set FORCE_REBUILD=1 to force rebuild pygbag
     networks:
       - yams-dev
 
@@ -48,6 +53,25 @@ services:
       - LOG_DIR=/app/data/logs/browser
     networks:
       - yams-dev
+
+  ide-server:
+    build:
+      context: .
+      dockerfile: docker/ide-server/Dockerfile
+    volumes:
+      # Only mount projects directory - frontend is built into the image
+      - ${PROJECTS_DIR:-./data/projects}:/app/data/projects
+    environment:
+      - PYTHONUNBUFFERED=1
+      - IDE_PROJECTS_DIR=/app/data/projects
+      - IDE_PORT=8003
+    networks:
+      - yams-dev
+
+volumes:
+  pygbag-build:
+    # Named volume to cache pygbag build output
+    # Use 'docker compose down -v' to clear and force rebuild
 
 networks:
   yams-dev:

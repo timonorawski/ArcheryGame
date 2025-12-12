@@ -74,9 +74,18 @@ class BrowserGameRuntime:
         self._state_broadcast_interval = 0.1  # 10Hz state updates to JS
         self._load_error: Optional[str] = None  # Track loading errors for display
 
+        # IDE bridge for Monaco editor integration
+        self._ide_bridge = None
+        self._ide_mode = False
+
         # Signal ready to JS
         js_log("[BrowserGameRuntime] Sending ready signal...")
         self._send_ready_signal()
+
+        # Initialize IDE bridge for Monaco editor integration
+        js_log("[BrowserGameRuntime] Initializing IDE bridge...")
+        self._init_ide_bridge()
+
         js_log("[BrowserGameRuntime] __init__ complete")
 
     def _send_ready_signal(self):
@@ -223,6 +232,9 @@ class BrowserGameRuntime:
             # Process messages from JavaScript
             await self._process_js_messages()
 
+            # Process IDE messages (Monaco editor integration)
+            await self._process_ide_messages()
+
             # Run game loop if we have a game
             if self.game:
                 # Get input events and pass to game
@@ -346,6 +358,122 @@ class BrowserGameRuntime:
 
         except Exception as e:
             self._send_to_js('level_error', {'error': str(e)})
+
+    # =========================================================================
+    # IDE Bridge Integration
+    # =========================================================================
+
+    def _init_ide_bridge(self):
+        """Initialize the IDE bridge for Monaco editor integration."""
+        if sys.platform != "emscripten":
+            return
+
+        js_log("[BrowserGameRuntime] Initializing IDE bridge...")
+        try:
+            from ams.content_fs_browser import get_content_fs
+            from ide_bridge import init_bridge
+
+            content_fs = get_content_fs()
+            self._ide_bridge = init_bridge(content_fs, self._ide_reload_callback)
+            js_log(f"[BrowserGameRuntime] IDE bridge initialized, project path: {self._ide_bridge.get_project_path()}")
+
+            # Load ide_bridge.js
+            browser_platform.window.eval('''
+                (function() {
+                    if (window.ideBridge) {
+                        console.log('[IDE Bridge] Already loaded');
+                        return;
+                    }
+                    var script = document.createElement('script');
+                    script.src = 'ide_bridge.js';
+                    script.onload = function() {
+                        console.log('[IDE Bridge] Script loaded');
+                    };
+                    script.onerror = function(e) {
+                        console.error('[IDE Bridge] Failed to load:', e);
+                    };
+                    document.head.appendChild(script);
+                })();
+            ''')
+        except Exception as e:
+            js_log(f"[BrowserGameRuntime] IDE bridge init failed: {e}")
+
+    def _ide_reload_callback(self):
+        """Called by IDE bridge after files are updated to reload the game."""
+        js_log("[BrowserGameRuntime] IDE reload callback triggered")
+        if self._ide_bridge:
+            # Load game from IDE project directory
+            asyncio.create_task(self._load_ide_project())
+
+    async def _load_ide_project(self):
+        """Load game from IDE project files."""
+        if not self._ide_bridge:
+            return
+
+        js_log("[BrowserGameRuntime] Loading IDE project...")
+        try:
+            project_path = self._ide_bridge.get_project_path()
+            game_json_path = f"{project_path}/game.json"
+
+            import os
+            if os.path.exists(game_json_path):
+                from ams.games.game_engine import GameEngine
+
+                # Load game engine from project's game.json
+                game_class = GameEngine.from_yaml(game_json_path)
+                self.game = game_class.create_game(self.width, self.height)
+                self._ide_mode = True
+                js_log(f"[BrowserGameRuntime] IDE project loaded successfully")
+
+                # Notify JS
+                if sys.platform == "emscripten":
+                    browser_platform.window.ideBridge.notifyReloaded()
+            else:
+                js_log(f"[BrowserGameRuntime] No game.json found at {game_json_path}")
+
+        except Exception as e:
+            js_log(f"[BrowserGameRuntime] IDE project load error: {e}")
+            if sys.platform == "emscripten":
+                browser_platform.window.ideBridge.notifyError(str(e), None, None)
+
+    async def _process_ide_messages(self):
+        """Process pending messages from IDE bridge."""
+        if sys.platform != "emscripten":
+            return
+
+        if not hasattr(browser_platform.window, 'ideBridge'):
+            return
+
+        try:
+            # Check for pending IDE messages
+            if browser_platform.window.ideBridge.hasPendingMessages():
+                msg = browser_platform.window.ideBridge.getNextMessage()
+                if msg:
+                    await self._handle_ide_message(msg)
+        except Exception as e:
+            js_log(f"[BrowserGameRuntime] IDE message processing error: {e}")
+
+    async def _handle_ide_message(self, msg):
+        """Handle a message from the IDE."""
+        msg_type = msg.get('type', '')
+        js_log(f"[BrowserGameRuntime] IDE message: {msg_type}")
+
+        if msg_type == 'files':
+            # Write files to ContentFS
+            files = msg.get('files', {})
+            if files and self._ide_bridge:
+                import json
+                result = self._ide_bridge.receive_files(json.dumps(files))
+                js_log(f"[BrowserGameRuntime] Files written: {result}")
+
+                # Notify JS
+                if sys.platform == "emscripten":
+                    files_written = result.get('files_written', 0) if isinstance(result, dict) else 0
+                    browser_platform.window.ideBridge.notifyFilesReceived(files_written)
+
+        elif msg_type == 'reload':
+            # Trigger game reload
+            await self._load_ide_project()
 
     def _broadcast_game_state(self):
         """Send current game state to JavaScript."""
@@ -487,17 +615,37 @@ class BrowserGameRuntime:
 
 
 def inject_fengari_scripts():
-    """Inject Fengari scripts into the page (called once at startup)."""
+    """Inject Fengari and IDE bridge scripts into the page (called once at startup)."""
     if sys.platform != "emscripten":
         return
 
-    js_log("[BrowserGameRuntime] Injecting Fengari scripts...")
+    js_log("[BrowserGameRuntime] Injecting Fengari and IDE bridge scripts...")
 
     try:
         # Initialize response arrays
         browser_platform.window.eval('''
             if (!window.gameMessages) window.gameMessages = [];
             if (!window.luaResponses) window.luaResponses = [];
+        ''')
+
+        # Load IDE bridge (for communication with Monaco editor)
+        browser_platform.window.eval('''
+            (function() {
+                if (window.ideBridge) {
+                    console.log('[IDE] Bridge already loaded');
+                    return;
+                }
+
+                var bridge = document.createElement('script');
+                bridge.src = 'ide_bridge.js';
+                bridge.onload = function() {
+                    console.log('[IDE] Bridge script loaded');
+                };
+                bridge.onerror = function(e) {
+                    console.error('[IDE] Failed to load bridge:', e);
+                };
+                document.head.appendChild(bridge);
+            })();
         ''')
 
         # Load Fengari bridge (will load fengari-web library itself)

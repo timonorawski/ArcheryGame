@@ -98,6 +98,36 @@ class ContentFSBrowser:
         full_path = self._resolve_path(path)
         return open(full_path, mode)
 
+    def writetext(self, path: str, content: str, encoding: str = 'utf-8') -> None:
+        """Write text file to Emscripten FS (IDE integration).
+
+        Creates parent directories if they don't exist.
+        """
+        full_path = self._resolve_path(path)
+        # Ensure parent directory exists
+        parent = os.path.dirname(full_path)
+        if parent and not os.path.exists(parent):
+            os.makedirs(parent, exist_ok=True)
+        with open(full_path, 'w', encoding=encoding) as f:
+            f.write(content)
+
+    def writebytes(self, path: str, content: bytes) -> None:
+        """Write binary file to Emscripten FS (IDE integration)."""
+        full_path = self._resolve_path(path)
+        parent = os.path.dirname(full_path)
+        if parent and not os.path.exists(parent):
+            os.makedirs(parent, exist_ok=True)
+        with open(full_path, 'wb') as f:
+            f.write(content)
+
+    def remove(self, path: str) -> bool:
+        """Remove a file from Emscripten FS."""
+        full_path = self._resolve_path(path)
+        if os.path.exists(full_path) and os.path.isfile(full_path):
+            os.remove(full_path)
+            return True
+        return False
+
     def walk_files(self, path: str = '/', filter_glob: list[str] | None = None) -> Iterator[str]:
         """Walk files in directory tree."""
         full_path = self._resolve_path(path)
