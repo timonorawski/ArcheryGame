@@ -1,0 +1,66 @@
+# Run test suites on push and PR
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-tests:
+    name: Python Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run core tests
+        run: |
+          pytest tests/ ams/games/game_engine/rollback/tests/ \
+            --tb=short \
+            -v \
+            --ignore=tests/test_integration.py
+
+      - name: Run DuckHunt tests
+        run: |
+          pytest games/DuckHunt/tests/ \
+            --tb=short \
+            -v
+
+  browser-tests:
+    name: Browser/JS Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Fengari
+        run: |
+          cd games/browser
+          npm init -y 2>/dev/null || true
+          npm install fengari fengari-interop
+
+      - name: Run Fengari bridge tests
+        run: |
+          cd games/browser
+          node --experimental-vm-modules tests/test_fengari_bridge.mjs
