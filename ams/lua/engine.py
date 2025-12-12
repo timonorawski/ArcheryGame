@@ -17,6 +17,7 @@ directory names. Common types include:
 """
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING
 
 from lupa import LuaRuntime
@@ -26,6 +27,15 @@ from .api import LuaAPIBase
 
 if TYPE_CHECKING:
     from ams.content_fs import ContentFS
+
+# Try to import ScriptLoader for .lua.yaml support
+try:
+    from ams.games.game_engine.lua.script_loader import ScriptLoader, ScriptMetadata
+    HAS_SCRIPT_LOADER = True
+except ImportError:
+    HAS_SCRIPT_LOADER = False
+    ScriptLoader = None
+    ScriptMetadata = None
 
 
 class LifecycleProvider(Protocol):
@@ -414,7 +424,10 @@ class LuaEngine:
             return False
 
     def load_subroutines_from_dir(self, sub_type: str, content_dir: str) -> int:
-        """Load all .lua files from a ContentFS directory.
+        """Load all .lua and .lua.yaml files from a ContentFS directory.
+
+        Prefers .lua.yaml files over .lua files when both exist (more metadata).
+        Uses ScriptLoader for .lua.yaml files when available.
 
         Args:
             sub_type: Subroutine type (e.g., 'behavior', 'collision_action')
@@ -424,14 +437,83 @@ class LuaEngine:
             Count of subroutines loaded
         """
         count = 0
-        if self._content_fs.exists(content_dir):
-            for item in self._content_fs.listdir(content_dir):
-                if item.endswith('.lua'):
-                    name = item[:-4]  # Remove .lua extension
+        if not self._content_fs.exists(content_dir):
+            return count
+
+        seen_names = set()
+
+        # First pass: .lua.yaml files (preferred, have metadata)
+        for item in self._content_fs.listdir(content_dir):
+            if item.endswith('.lua.yaml'):
+                name = item[:-9]  # Remove .lua.yaml extension
+                content_path = f'{content_dir}/{item}'
+                if self._load_yaml_subroutine(sub_type, name, content_path):
+                    seen_names.add(name)
+                    count += 1
+
+        # Second pass: .lua files (only if no .lua.yaml version exists)
+        for item in self._content_fs.listdir(content_dir):
+            if item.endswith('.lua'):
+                name = item[:-4]  # Remove .lua extension
+                if name not in seen_names:
                     content_path = f'{content_dir}/{item}'
                     if self.load_subroutine(sub_type, name, content_path):
                         count += 1
+
         return count
+
+    def _load_yaml_subroutine(self, sub_type: str, name: str, content_path: str) -> bool:
+        """Load a .lua.yaml subroutine using ScriptLoader.
+
+        Args:
+            sub_type: Subroutine type
+            name: Subroutine name
+            content_path: ContentFS path to .lua.yaml file
+
+        Returns:
+            True if loaded successfully
+        """
+        if name in self._subroutines[sub_type]:
+            return True  # Already loaded
+
+        if not HAS_SCRIPT_LOADER:
+            # Fall back to treating as raw Lua (just extract code)
+            print(f"[LuaEngine] ScriptLoader not available, skipping {content_path}")
+            return False
+
+        if not self._content_fs.exists(content_path):
+            print(f"[LuaEngine] Subroutine not found: {content_path}")
+            return False
+
+        try:
+            # Read YAML content
+            yaml_content = self._content_fs.readtext(content_path)
+
+            # Parse with ScriptLoader
+            import yaml
+            data = yaml.safe_load(yaml_content)
+
+            # Create ScriptMetadata
+            loader = ScriptLoader(validate=False)  # Schema validation optional
+            script = loader.load_inline(name, sub_type, data)
+
+            # Execute the Lua code
+            result = self._lua.execute(script.code)
+
+            if result is None:
+                g = self._lua.globals()
+                result = getattr(g, name, None)
+
+            if result is None:
+                print(f"[LuaEngine] Subroutine {name} did not return a table")
+                return False
+
+            self._subroutines[sub_type][name] = result
+            return True
+
+        except Exception as e:
+            print(f"[LuaEngine] Error loading {sub_type}/{name}.lua.yaml: {e}")
+            return False
 
     def get_subroutine(self, sub_type: str, name: str) -> Optional[Any]:
         """Get a loaded subroutine by type and name."""

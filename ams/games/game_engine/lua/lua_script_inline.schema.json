@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://yamplay.cc/schemas/lua_script_inline.schema.json",
+  "title": "YAMS Inline Lua Script",
+  "description": "Schema for inline Lua scripts embedded in game.yaml",
+  "type": "object",
+  "required": ["code"],
+  "properties": {
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this script does"
+    },
+    "config": {
+      "type": "object",
+      "description": "Configuration schema for behavior_config or modifier parameters",
+      "additionalProperties": {
+        "$ref": "#/$defs/configParam"
+      }
+    },
+    "args": {
+      "type": "object",
+      "description": "Arguments schema for generators and input actions",
+      "additionalProperties": {
+        "$ref": "#/$defs/configParam"
+      }
+    },
+    "provides": {
+      "type": "object",
+      "description": "What this script provides/implements",
+      "properties": {
+        "hooks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["on_spawn", "on_update", "on_destroy", "on_hit", "execute", "generate"]
+          },
+          "description": "Lifecycle hooks implemented by this script"
+        },
+        "properties": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Entity properties created/managed by this script"
+        }
+      },
+      "additionalProperties": false
+    },
+    "code": {
+      "type": "string",
+      "description": "The Lua source code"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "configParam": {
+      "type": "object",
+      "description": "Configuration parameter definition",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["int", "float", "string", "bool", "array", "object"],
+          "description": "Parameter data type"
+        },
+        "description": {
+          "type": "string",
+          "description": "What this parameter controls"
+        },
+        "default": {
+          "description": "Default value if not specified"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this parameter must be provided"
+        },
+        "min": {
+          "type": "number",
+          "description": "Minimum value (for int/float)"
+        },
+        "max": {
+          "type": "number",
+          "description": "Maximum value (for int/float)"
+        },
+        "enum": {
+          "type": "array",
+          "description": "Allowed values (for string)"
+        },
+        "items": {
+          "$ref": "#/$defs/configParam",
+          "description": "Item schema (for array type)"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

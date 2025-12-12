@@ -227,8 +227,11 @@ class GameEngine(BaseGame):
         self._load_subroutines()
 
         # Load game definition
+        self._raw_game_data: Optional[dict] = None  # Store raw data for inline scripts
         if self.GAME_DEF_FILE and self.GAME_DEF_FILE.exists():
             self._game_def = self._load_game_definition(self.GAME_DEF_FILE)
+            # Load inline scripts after game definition (they can override file-based scripts)
+            self._load_inline_scripts()
 
         # Register spawn handler on API so Lua spawns use entity type config
         api = self._behavior_engine.api
@@ -290,6 +293,9 @@ class GameEngine(BaseGame):
 
         # Validate against schema (raises SchemaValidationError unless AMS_SKIP_SCHEMA_VALIDATION=1)
         validate_game_yaml(data, path)
+
+        # Store raw data for inline script loading
+        self._raw_game_data = data
 
         # Parse assets section
         assets_data = data.get('assets', {})
@@ -551,6 +557,52 @@ class GameEngine(BaseGame):
             lua_path = f'lua/{sub_type}'
             if self._content_fs.exists(lua_path):
                 self._behavior_engine.load_subroutines_from_dir(sub_type, lua_path)
+
+    def _load_inline_scripts(self) -> None:
+        """Load inline scripts from game.yaml.
+
+        Looks for top-level keys:
+        - inline_behaviors: {name: {code: ..., description: ...}, ...}
+        - inline_collision_actions: {name: {code: ..., ...}, ...}
+        - inline_generators: {name: {code: ..., ...}, ...}
+        - inline_input_actions: {name: {code: ..., ...}, ...}
+
+        These are loaded AFTER file-based scripts, allowing game-specific
+        overrides or one-off scripts without creating separate files.
+        """
+        if not self._raw_game_data:
+            return
+
+        # Map section names to subroutine types
+        inline_sections = {
+            'inline_behaviors': 'behavior',
+            'inline_collision_actions': 'collision_action',
+            'inline_generators': 'generator',
+            'inline_input_actions': 'input_action',
+        }
+
+        for section_name, sub_type in inline_sections.items():
+            section_data = self._raw_game_data.get(section_name, {})
+            if not section_data:
+                continue
+
+            for name, script_def in section_data.items():
+                if not isinstance(script_def, dict):
+                    print(f"[GameEngine] Invalid inline script '{name}': expected dict")
+                    continue
+
+                code = script_def.get('code')
+                if not code:
+                    print(f"[GameEngine] Inline script '{name}' missing 'code' field")
+                    continue
+
+                # Load via LuaEngine's inline loader
+                if self._behavior_engine.load_inline_subroutine(sub_type, name, code):
+                    desc = script_def.get('description', '')
+                    if desc:
+                        print(f"[GameEngine] Loaded inline {sub_type}: {name} - {desc[:50]}")
+                else:
+                    print(f"[GameEngine] Failed to load inline {sub_type}: {name}")
 
     def _parse_behaviors(self, entity_type: str, behaviors_data: List[Any]) -> List[str]:
         """Parse behaviors list, handling both file references and inline Lua.

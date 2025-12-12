@@ -141,6 +141,34 @@
     "default_layout": {
       "$ref": "level.schema.json#/$defs/level_definition",
       "description": "Default level layout when no level is specified (inline level definition)"
+    },
+    "inline_behaviors": {
+      "type": "object",
+      "description": "Inline behavior scripts (name -> script definition)",
+      "additionalProperties": {
+        "$ref": "../lua/lua_script_inline.schema.json"
+      }
+    },
+    "inline_collision_actions": {
+      "type": "object",
+      "description": "Inline collision action scripts (name -> script definition)",
+      "additionalProperties": {
+        "$ref": "../lua/lua_script_inline.schema.json"
+      }
+    },
+    "inline_generators": {
+      "type": "object",
+      "description": "Inline generator scripts (name -> script definition)",
+      "additionalProperties": {
+        "$ref": "../lua/lua_script_inline.schema.json"
+      }
+    },
+    "inline_input_actions": {
+      "type": "object",
+      "description": "Inline input action scripts (name -> script definition)",
+      "additionalProperties": {
+        "$ref": "../lua/lua_script_inline.schema.json"
+      }
     }
   },
 
