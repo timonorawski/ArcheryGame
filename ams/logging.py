@@ -50,12 +50,95 @@ _config: Dict[str, Any] = {
     'lua_calls': False,      # Trace ams.* API calls from Lua
     'lua_scripts': False,    # Log which scripts are executed
     'output': 'auto',        # 'auto', 'console', 'js'
+    'log_dir': None,         # Override log directory (None = platform default)
+    'modules': {},           # Per-module settings (hierarchical)
 }
 
 
 def _is_browser() -> bool:
     """Check if running in browser (Emscripten/WASM)."""
     return sys.platform == 'emscripten'
+
+
+def get_log_dir() -> str:
+    """Get the log directory, respecting AMS_LOG_DIR env var.
+
+    Priority:
+    1. AMS_LOG_DIR environment variable
+    2. Configured log_dir in _config
+    3. Platform-specific user data directory:
+       - macOS: ~/Library/Application Support/AMS/logs
+       - Windows: %APPDATA%/AMS/logs
+       - Linux: ~/.local/share/ams/logs
+
+    Returns:
+        Path to log directory (as string)
+    """
+    from pathlib import Path
+
+    # Check explicit config first
+    if _config.get('log_dir'):
+        return str(Path(_config['log_dir']).expanduser())
+
+    # Check env var
+    env_dir = os.environ.get('AMS_LOG_DIR')
+    if env_dir:
+        return str(Path(env_dir).expanduser())
+
+    # Fall back to platform default
+    if sys.platform == 'darwin':
+        user_data = Path.home() / 'Library' / 'Application Support' / 'AMS'
+    elif sys.platform == 'win32':
+        user_data = Path(os.environ.get('APPDATA', str(Path.home()))) / 'AMS'
+    else:
+        xdg_data = os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local' / 'share'))
+        user_data = Path(xdg_data) / 'ams'
+
+    return str(user_data / 'logs')
+
+
+def get_module_config(module: str) -> Dict[str, Any]:
+    """Get configuration for a specific module.
+
+    Modules can have hierarchical settings configured via env vars:
+        AMS_LOGGING_ROLLBACK_ENABLED=true
+        AMS_LOGGING_ROLLBACK_SNAPSHOT_INTERVAL=5
+
+    Maps to:
+        {'enabled': True, 'snapshot': {'interval': 5}}
+
+    Args:
+        module: Module name (e.g., 'rollback', 'game_engine')
+
+    Returns:
+        Dict of module settings, empty dict if none configured
+    """
+    return _config.get('modules', {}).get(module.lower(), {})
+
+
+def _set_nested(d: Dict, keys: list, value: Any) -> None:
+    """Set a value in a nested dict, creating intermediate dicts as needed."""
+    for key in keys[:-1]:
+        d = d.setdefault(key, {})
+    d[keys[-1]] = value
+
+
+def _parse_env_value(value: str) -> Any:
+    """Parse environment variable value to appropriate type."""
+    lower = value.lower()
+    if lower in ('true', '1', 'yes', 'on'):
+        return True
+    if lower in ('false', '0', 'no', 'off'):
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    return value
 
 
 def _js_log(msg: str) -> None:
@@ -115,20 +198,50 @@ def configure_logging(
 
 
 def _load_env_config() -> None:
-    """Load configuration from environment variables."""
+    """Load configuration from environment variables.
+
+    Supports two prefixes:
+    - AMS_LOG_*: Log levels (AMS_LOG_GAME_ENGINE=DEBUG)
+    - AMS_LOGGING_*: Module settings (AMS_LOGGING_ROLLBACK_ENABLED=true)
+
+    Hierarchical module settings use underscore as separator:
+        AMS_LOGGING_ROLLBACK_ENABLED=true
+        AMS_LOGGING_ROLLBACK_SNAPSHOT_INTERVAL=5
+
+    Maps to:
+        modules['rollback'] = {'enabled': True, 'snapshot': {'interval': 5}}
+    """
     # Global level
     if 'AMS_LOG_LEVEL' in os.environ:
         _config['default_level'] = _level_from_string(os.environ['AMS_LOG_LEVEL'])
 
+    # Log directory override
+    if 'AMS_LOG_DIR' in os.environ:
+        _config['log_dir'] = os.environ['AMS_LOG_DIR']
+
     # Module-specific levels (AMS_LOG_GAME_ENGINE=DEBUG -> game_engine: DEBUG)
+    reserved = ('AMS_LOG_LEVEL', 'AMS_LOG_LUA_CALLS', 'AMS_LOG_LUA_SCRIPTS', 'AMS_LOG_DIR')
     for key, value in os.environ.items():
-        if key.startswith('AMS_LOG_') and key not in ('AMS_LOG_LEVEL', 'AMS_LOG_LUA_CALLS', 'AMS_LOG_LUA_SCRIPTS'):
+        if key.startswith('AMS_LOG_') and key not in reserved:
             module_name = key[8:].lower()  # Remove 'AMS_LOG_' prefix
             _config['module_levels'][module_name] = _level_from_string(value)
 
     # Lua tracing
     _config['lua_calls'] = os.environ.get('AMS_LOG_LUA_CALLS', '').lower() in ('1', 'true', 'yes')
     _config['lua_scripts'] = os.environ.get('AMS_LOG_LUA_SCRIPTS', '').lower() in ('1', 'true', 'yes')
+
+    # Hierarchical module settings (AMS_LOGGING_MODULE_KEY_SUBKEY=value)
+    for key, value in os.environ.items():
+        if key.startswith('AMS_LOGGING_'):
+            parts = key[12:].lower().split('_')  # Remove 'AMS_LOGGING_' prefix
+            if len(parts) >= 2:
+                module = parts[0]
+                setting_path = parts[1:]
+
+                if module not in _config['modules']:
+                    _config['modules'][module] = {}
+
+                _set_nested(_config['modules'][module], setting_path, _parse_env_value(value))
 
 
 # Load env config on import

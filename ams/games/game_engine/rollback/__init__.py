@@ -19,14 +19,33 @@ Usage:
     if manager.process_delayed_hit(game_engine, hit_event):
         # Hit was processed via rollback
         pass
+
+Debugging:
+    from ams.games.game_engine.rollback import GameStateLogger
+
+    with GameStateLogger(session_name="debug") as logger:
+        snapshot = manager.capture(game_engine)
+        logger.log_snapshot(snapshot)
 """
 
 from .snapshot import EntitySnapshot, GameSnapshot, ScheduledCallbackSnapshot
 from .manager import RollbackStateManager
+from .logger import (
+    GameStateLogger,
+    NullLogger,
+    create_logger,
+    load_log,
+    summarize_log,
+)
 
 __all__ = [
     'EntitySnapshot',
     'GameSnapshot',
     'ScheduledCallbackSnapshot',
     'RollbackStateManager',
+    'GameStateLogger',
+    'NullLogger',
+    'create_logger',
+    'load_log',
+    'summarize_log',
 ]

@@ -739,6 +739,251 @@ class TestStatistics:
 
 
 # =============================================================================
+# Logger Tests
+# =============================================================================
+
+from ams.games.game_engine.rollback import (
+    GameStateLogger,
+    NullLogger,
+    create_logger,
+    load_log,
+    summarize_log,
+)
+
+
+class TestGameStateLogger:
+    """Tests for GameStateLogger."""
+
+    def test_creates_log_file(self, tmp_path):
+        """Test logger creates a log file."""
+        logger = GameStateLogger(
+            output_dir=str(tmp_path),
+            session_name="test_session",
+        )
+
+        assert logger.log_path.exists()
+        assert logger.log_path.name == "test_session.jsonl"
+
+        logger.close()
+
+    def test_writes_header(self, tmp_path):
+        """Test logger writes header as first line."""
+        with GameStateLogger(output_dir=str(tmp_path), session_name="test") as logger:
+            pass
+
+        records = load_log(logger.log_path)
+        assert len(records) >= 1
+        assert records[0]["type"] == "header"
+        assert records[0]["session_name"] == "test"
+
+    def test_writes_footer(self, tmp_path):
+        """Test logger writes footer on close."""
+        with GameStateLogger(output_dir=str(tmp_path), session_name="test") as logger:
+            pass
+
+        records = load_log(logger.log_path)
+        assert records[-1]["type"] == "footer"
+        assert "total_snapshots" in records[-1]
+
+    def test_log_snapshot(self, tmp_path, game_engine, manager):
+        """Test logging a snapshot."""
+        with GameStateLogger(output_dir=str(tmp_path)) as logger:
+            snapshot = manager.capture(game_engine, force=True)
+            logger.log_snapshot(snapshot)
+
+        records = load_log(logger.log_path)
+        snapshots = [r for r in records if r.get("type") == "snapshot"]
+
+        assert len(snapshots) == 1
+        assert "frame_number" in snapshots[0]
+        assert "elapsed_time" in snapshots[0]
+        assert "score" in snapshots[0]
+
+    def test_log_interval(self, tmp_path, game_engine, manager):
+        """Test log_interval skips snapshots."""
+        with GameStateLogger(
+            output_dir=str(tmp_path),
+            log_interval=3,  # Log every 3rd snapshot
+        ) as logger:
+            for _ in range(9):
+                snapshot = manager.capture(game_engine, force=True)
+                logger.log_snapshot(snapshot)
+
+        records = load_log(logger.log_path)
+        snapshots = [r for r in records if r.get("type") == "snapshot"]
+
+        # Should have logged snapshots 3, 6, 9 = 3 total
+        assert len(snapshots) == 3
+
+    def test_log_entities(self, tmp_path, game_with_entities, manager):
+        """Test entities are included in snapshot."""
+        with GameStateLogger(
+            output_dir=str(tmp_path),
+            include_entities=True,
+        ) as logger:
+            snapshot = manager.capture(game_with_entities, force=True)
+            logger.log_snapshot(snapshot)
+
+        records = load_log(logger.log_path)
+        snapshots = [r for r in records if r.get("type") == "snapshot"]
+
+        assert "entities" in snapshots[0]
+        assert "player" in snapshots[0]["entities"]
+        assert snapshots[0]["entities"]["player"]["x"] == 100.0
+
+    def test_log_without_entities(self, tmp_path, game_with_entities, manager):
+        """Test entities can be excluded."""
+        with GameStateLogger(
+            output_dir=str(tmp_path),
+            include_entities=False,
+        ) as logger:
+            snapshot = manager.capture(game_with_entities, force=True)
+            logger.log_snapshot(snapshot)
+
+        records = load_log(logger.log_path)
+        snapshots = [r for r in records if r.get("type") == "snapshot"]
+
+        assert "entities" not in snapshots[0]
+        assert "entity_count" in snapshots[0]  # Summary still present
+
+    def test_log_rollback_event(self, tmp_path):
+        """Test logging rollback events."""
+        with GameStateLogger(output_dir=str(tmp_path)) as logger:
+            logger.log_rollback(
+                target_timestamp=1000.0,
+                restored_frame=50,
+                frames_resimulated=30,
+                hit_position=(0.5, 0.5),
+            )
+
+        records = load_log(logger.log_path)
+        rollbacks = [r for r in records if r.get("type") == "rollback"]
+
+        assert len(rollbacks) == 1
+        assert rollbacks[0]["restored_frame"] == 50
+        assert rollbacks[0]["frames_resimulated"] == 30
+        assert rollbacks[0]["hit_position"] == [0.5, 0.5]
+
+    def test_log_custom_event(self, tmp_path):
+        """Test logging custom events."""
+        with GameStateLogger(output_dir=str(tmp_path)) as logger:
+            logger.log_event("hit_detected", {"x": 100, "y": 200, "entity": "brick_1"})
+
+        records = load_log(logger.log_path)
+        custom = [r for r in records if r.get("type") == "hit_detected"]
+
+        assert len(custom) == 1
+        assert custom[0]["x"] == 100
+        assert custom[0]["entity"] == "brick_1"
+
+    def test_stats(self, tmp_path, game_engine, manager):
+        """Test stats property."""
+        with GameStateLogger(output_dir=str(tmp_path)) as logger:
+            for _ in range(5):
+                snapshot = manager.capture(game_engine, force=True)
+                logger.log_snapshot(snapshot)
+
+            stats = logger.stats
+            assert stats["total_snapshots"] == 5
+            assert stats["logged_snapshots"] == 5
+
+
+class TestLogAnalysis:
+    """Tests for log analysis utilities."""
+
+    def test_summarize_log(self, tmp_path, game_with_entities, manager):
+        """Test log summary generation."""
+        with GameStateLogger(output_dir=str(tmp_path)) as logger:
+            # Log some snapshots
+            for i in range(10):
+                game_with_entities._behavior_engine.score = i * 10
+                snapshot = manager.capture(game_with_entities, force=True)
+                logger.log_snapshot(snapshot)
+
+            # Log a rollback
+            logger.log_rollback(
+                target_timestamp=1000.0,
+                restored_frame=5,
+                frames_resimulated=20,
+            )
+
+        summary = summarize_log(logger.log_path)
+
+        assert summary["logged_snapshots"] == 10
+        assert summary["rollback_count"] == 1
+        assert summary["total_frames_resimulated"] == 20
+        assert summary["final_score"] == 90
+
+
+class TestNullLogger:
+    """Tests for NullLogger (disabled logging)."""
+
+    def test_null_logger_methods_are_noop(self):
+        """Test NullLogger methods don't raise errors."""
+        logger = NullLogger()
+
+        # These should all be no-ops
+        assert logger.log_snapshot(None) is False
+        logger.log_rollback(1.0, 10, 5)
+        logger.log_event("test", {"foo": "bar"})
+        logger.flush()
+        logger.close()
+
+    def test_null_logger_properties(self):
+        """Test NullLogger property values."""
+        logger = NullLogger()
+
+        assert logger.log_path is None
+        assert logger.stats == {"enabled": False}
+
+    def test_null_logger_context_manager(self):
+        """Test NullLogger works as context manager."""
+        with NullLogger() as logger:
+            logger.log_event("test", {})
+        # Should not raise
+
+
+class TestCreateLogger:
+    """Tests for create_logger factory."""
+
+    def test_create_logger_disabled_by_default(self, tmp_path, monkeypatch):
+        """Test create_logger returns NullLogger when not enabled."""
+        # Clear any rollback config
+        monkeypatch.delenv('AMS_LOGGING_ROLLBACK_ENABLED', raising=False)
+        # Force reload of config
+        import ams.logging as ams_logging
+        ams_logging._config['modules'] = {}
+
+        logger = create_logger()
+        assert isinstance(logger, NullLogger)
+
+    def test_create_logger_force_bypasses_config(self, tmp_path, monkeypatch):
+        """Test force=True creates logger even when disabled."""
+        monkeypatch.delenv('AMS_LOGGING_ROLLBACK_ENABLED', raising=False)
+        import ams.logging as ams_logging
+        ams_logging._config['modules'] = {}
+
+        logger = create_logger(output_dir=str(tmp_path), force=True)
+        try:
+            assert isinstance(logger, GameStateLogger)
+        finally:
+            logger.close()
+
+    def test_create_logger_respects_interval_config(self, tmp_path, monkeypatch):
+        """Test create_logger uses interval from config."""
+        import ams.logging as ams_logging
+        ams_logging._config['modules']['rollback'] = {'enabled': True, 'interval': 5}
+
+        logger = create_logger(output_dir=str(tmp_path))
+        try:
+            assert isinstance(logger, GameStateLogger)
+            assert logger.log_interval == 5
+        finally:
+            logger.close()
+            ams_logging._config['modules'] = {}
+
+
+# =============================================================================
 # Run tests
 # =============================================================================
 
