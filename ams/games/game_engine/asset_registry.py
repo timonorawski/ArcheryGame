@@ -21,8 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, TYPE_CHECKING, Tuple
 
-import yaml
-
+from ams.yaml import loads as yaml_loads
 from ams.games.game_engine.config import SpriteConfig, SoundConfig
 
 if TYPE_CHECKING:
@@ -121,7 +120,7 @@ class AssetRegistry:
         """Process a single registration YAML file via ContentFS."""
         try:
             content = self._content_fs.readtext(yaml_path)
-            data = yaml.safe_load(content)
+            data = yaml_loads(content, format='yaml')
 
             if not data or not isinstance(data, dict):
                 return
@@ -142,7 +141,7 @@ class AssetRegistry:
         """Process a single registration YAML file via filesystem."""
         try:
             content = yaml_path.read_text()
-            data = yaml.safe_load(content)
+            data = yaml_loads(content, format='yaml')
 
             if not data or not isinstance(data, dict):
                 return

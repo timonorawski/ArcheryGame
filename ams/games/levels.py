@@ -22,37 +22,25 @@ Example level group (campaign.yaml):
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-import json
 from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional, Type, TypeVar, Generic
 
-# YAML is optional - not available in WASM/browser environment
-# Browser builds use JSON files converted from YAML during build
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
-    yaml = None  # type: ignore
-
+from ams.yaml import (
+    load as yaml_load,
+    load_schema,
+    validate as yaml_validate,
+    HAS_YAML,
+    SKIP_VALIDATION,
+    SchemaValidationError,
+)
 
 # =============================================================================
 # Schema Validation
 # =============================================================================
 
-import os
-
 _level_schema: Optional[Dict[str, Any]] = None
 _SCHEMAS_DIR = Path(__file__).parent / 'game_engine' / 'schemas'
-
-# Set AMS_SKIP_SCHEMA_VALIDATION=1 to disable strict validation
-_SKIP_VALIDATION = os.environ.get('AMS_SKIP_SCHEMA_VALIDATION', '').lower() in ('1', 'true', 'yes')
-
-
-class SchemaValidationError(Exception):
-    """Raised when YAML data fails schema validation."""
-    pass
 
 
 def _get_level_schema() -> Optional[Dict[str, Any]]:
@@ -61,8 +49,7 @@ def _get_level_schema() -> Optional[Dict[str, Any]]:
     if _level_schema is None:
         schema_path = _SCHEMAS_DIR / 'level.schema.json'
         if schema_path.exists():
-            with open(schema_path) as f:
-                _level_schema = json.load(f)
+            _level_schema = load_schema(schema_path)
     return _level_schema
 
 
@@ -75,39 +62,23 @@ def validate_level_yaml(data: Dict[str, Any], source_path: Optional[Path] = None
 
     Raises:
         SchemaValidationError: If validation fails (unless AMS_SKIP_SCHEMA_VALIDATION=1)
-        ImportError: If jsonschema is not installed (unless AMS_SKIP_SCHEMA_VALIDATION=1)
     """
     schema = _get_level_schema()
     if schema is None:
         error_msg = f"Schema file not found: {_SCHEMAS_DIR / 'level.schema.json'}"
-        if _SKIP_VALIDATION:
+        if SKIP_VALIDATION:
             print(f"[LevelLoader] Warning: {error_msg}")
             return
         raise SchemaValidationError(error_msg)
 
-    try:
-        import jsonschema
-    except ImportError:
-        # jsonschema not available (e.g., browser/WASM builds)
-        # TODO: Add JS-side validation with Ajv for browser security
-        print(f"[LevelLoader] Warning: Schema validation skipped (jsonschema not available in browser)")
-        return
-
-    try:
-        jsonschema.validate(data, schema)
-    except jsonschema.ValidationError as e:
+    errors = yaml_validate(data, schema, raise_on_error=False)
+    if errors:
         path_str = f" in {source_path}" if source_path else ""
-        error_msg = f"Schema validation error{path_str}: {e.message} at {'/'.join(str(p) for p in e.absolute_path)}"
-        if _SKIP_VALIDATION:
+        error_msg = f"Schema validation error{path_str}: {errors[0]}"
+        if SKIP_VALIDATION:
             print(f"[LevelLoader] Warning: {error_msg}")
         else:
-            raise SchemaValidationError(error_msg) from e
-    except jsonschema.SchemaError as e:
-        error_msg = f"Invalid schema: {e.message}"
-        if _SKIP_VALIDATION:
-            print(f"[LevelLoader] Warning: {error_msg}")
-        else:
-            raise SchemaValidationError(error_msg) from e
+            raise SchemaValidationError(error_msg, errors=errors, path=source_path)
 
 
 def _load_data_file(path: Path) -> Dict[str, Any]:
@@ -118,18 +89,11 @@ def _load_data_file(path: Path) -> Dict[str, Any]:
     # Check for JSON version first (browser-compatible)
     json_path = path.with_suffix('.json')
     if json_path.exists():
-        with open(json_path, 'r') as f:
-            return json.load(f) or {}
+        return yaml_load(json_path) or {}
 
     # Fall back to YAML if available
     if path.suffix == '.yaml' and path.exists():
-        if not HAS_YAML:
-            raise ImportError(
-                f"Cannot load {path}: PyYAML not available. "
-                "In browser builds, use JSON files instead."
-            )
-        with open(path, 'r') as f:
-            return yaml.safe_load(f) or {}
+        return yaml_load(path) or {}
 
     raise FileNotFoundError(f"No data file found: {path}")
 

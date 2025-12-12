@@ -25,13 +25,8 @@ import uuid
 
 import pygame
 
-# PyYAML is optional - not available in browser/WASM builds
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    yaml = None
-    HAS_YAML = False
+# Unified YAML/JSON loader (handles browser/WASM fallback)
+from ams.yaml import load as yaml_load, HAS_YAML
 
 from ams.games.base_game import BaseGame
 from ams.games.game_state import GameState
@@ -127,13 +122,7 @@ class GameEngine(BaseGame):
             game = MyGame()
         """
         # Load YAML or JSON to extract metadata (JSON for browser builds)
-        with open(yaml_path) as f:
-            if yaml_path.suffix == '.json':
-                game_data = json.load(f)
-            elif HAS_YAML:
-                game_data = yaml.safe_load(f)
-            else:
-                raise ImportError(f"Cannot load {yaml_path}: PyYAML not available. Use JSON for browser builds.")
+        game_data = yaml_load(yaml_path)
 
         # Extract metadata with defaults
         name = game_data.get('name', yaml_path.parent.name)
@@ -285,13 +274,7 @@ class GameEngine(BaseGame):
 
     def _load_game_definition(self, path: Path) -> GameDefinition:
         """Load game definition from YAML or JSON file."""
-        with open(path) as f:
-            if path.suffix == '.json':
-                data = json.load(f)
-            elif HAS_YAML:
-                data = yaml.safe_load(f)
-            else:
-                raise ImportError(f"Cannot load {path}: PyYAML not available. Use JSON for browser builds.")
+        data = yaml_load(path)
 
         # Validate against schema (raises SchemaValidationError unless AMS_SKIP_SCHEMA_VALIDATION=1)
         validate_game_yaml(data, path)

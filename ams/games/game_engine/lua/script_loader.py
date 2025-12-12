@@ -40,17 +40,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
-
-try:
-    import jsonschema
-    HAS_JSONSCHEMA = True
-except ImportError:
-    HAS_JSONSCHEMA = False
+from ams.yaml import (
+    load as yaml_load,
+    loads as yaml_loads,
+    validate as yaml_validate,
+    load_schema,
+    HAS_YAML,
+    HAS_JSONSCHEMA,
+    SchemaValidationError,
+)
 
 
 @dataclass
@@ -177,8 +175,7 @@ class ScriptLoader:
             schema_path = Path(__file__).parent / 'lua_script.schema.json'
 
         if schema_path.exists():
-            with open(schema_path, 'r') as f:
-                return json.load(f)
+            return load_schema(schema_path)
         return None
 
     def load_file(self, path: Union[str, Path]) -> ScriptMetadata:
@@ -214,11 +211,7 @@ class ScriptLoader:
 
     def _load_yaml_file(self, path: Path) -> ScriptMetadata:
         """Load a .lua.yaml file."""
-        if not HAS_YAML:
-            raise ImportError("PyYAML required for .lua.yaml files")
-
-        with open(path, 'r') as f:
-            content = yaml.safe_load(f)
+        content = yaml_load(path)
 
         if not isinstance(content, dict):
             raise ScriptValidationError(
@@ -339,18 +332,17 @@ class ScriptLoader:
 
     def _validate_against_schema(self, content: Dict, path: Path) -> None:
         """Validate content against JSON schema."""
-        if not HAS_JSONSCHEMA:
+        if not self.schema:
             return
 
         try:
-            jsonschema.validate(content, self.schema)
-        except jsonschema.ValidationError as e:
-            error_msg = f"Schema validation failed: {e.message}"
+            yaml_validate(content, self.schema, raise_on_error=True)
+        except SchemaValidationError as e:
             if self.strict:
-                raise ScriptValidationError(error_msg, path=str(path), errors=[str(e)])
+                raise ScriptValidationError(str(e), path=str(path), errors=e.errors)
             else:
                 import warnings
-                warnings.warn(f"{path}: {error_msg}")
+                warnings.warn(f"{path}: {e}")
 
     def load_inline(
         self,
