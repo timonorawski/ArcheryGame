@@ -51,12 +51,11 @@ def validate_game_yaml(data: Dict[str, Any], source_path: Optional[Path] = None)
     try:
         import jsonschema
         from jsonschema import RefResolver
-    except ImportError as e:
-        error_msg = "jsonschema package not installed - required for YAML validation"
-        if _SKIP_VALIDATION:
-            print(f"[GameEngine] Warning: {error_msg}")
-            return
-        raise ImportError(error_msg) from e
+    except ImportError:
+        # jsonschema not available (e.g., browser/WASM builds)
+        # TODO: Add JS-side validation with Ajv for browser security
+        print(f"[GameEngine] Warning: Schema validation skipped (jsonschema not available in browser)")
+        return
 
     try:
         # Create resolver with local schema store for external $ref

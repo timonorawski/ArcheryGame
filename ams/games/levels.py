@@ -44,7 +44,7 @@ except ImportError:
 import os
 
 _level_schema: Optional[Dict[str, Any]] = None
-_SCHEMAS_DIR = Path(__file__).parent.parent.parent / 'schemas'
+_SCHEMAS_DIR = Path(__file__).parent / 'game_engine' / 'schemas'
 
 # Set AMS_SKIP_SCHEMA_VALIDATION=1 to disable strict validation
 _SKIP_VALIDATION = os.environ.get('AMS_SKIP_SCHEMA_VALIDATION', '').lower() in ('1', 'true', 'yes')
@@ -87,12 +87,11 @@ def validate_level_yaml(data: Dict[str, Any], source_path: Optional[Path] = None
 
     try:
         import jsonschema
-    except ImportError as e:
-        error_msg = "jsonschema package not installed - required for YAML validation"
-        if _SKIP_VALIDATION:
-            print(f"[LevelLoader] Warning: {error_msg}")
-            return
-        raise ImportError(error_msg) from e
+    except ImportError:
+        # jsonschema not available (e.g., browser/WASM builds)
+        # TODO: Add JS-side validation with Ajv for browser security
+        print(f"[LevelLoader] Warning: Schema validation skipped (jsonschema not available in browser)")
+        return
 
     try:
         jsonschema.validate(data, schema)

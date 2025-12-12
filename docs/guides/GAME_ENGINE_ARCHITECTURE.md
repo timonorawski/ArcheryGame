@@ -75,7 +75,7 @@ class GameEngine(BaseGame):
         """AABB check + dispatch collision_behaviors actions."""
 
     def _apply_input_mapping(self, event: InputEvent) -> None:
-        """Route input to entities per input_mapping in game.yaml."""
+      """Route input to entities per input_mapping in game.yaml."""
 ```
 
 ### GameEntity (`ams/games/game_engine/entity.py`)
