@@ -85,6 +85,7 @@ Welcome to your arcade renaissance.
 
 ## Documentation
 
+- See [`docs/WHY_LUA.md`](docs/WHY_LUA.md) for why Lua is the load-bearing layer
 - See `docs/architecture/` for architecture overview
 - See `docs/guides/` for setup guides
 - See `docs/history/` for design rationale
