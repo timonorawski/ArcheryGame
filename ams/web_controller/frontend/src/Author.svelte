@@ -68,6 +68,9 @@
   let splitPosition = 50; // percentage
   let isDragging = false;
 
+  // Reference to PreviewFrame for imperative actions
+  let previewFrame;
+
   // Load project on mount
   onMount(async () => {
     await Promise.all([loadFiletypes(), loadBuiltins()]);
@@ -477,6 +480,39 @@
     document.removeEventListener('mousemove', handleDrag);
     document.removeEventListener('mouseup', handleDragEnd);
   }
+
+  async function handleRun() {
+    // Save any pending changes first
+    if (isDirty) {
+      await saveCurrentFile();
+    }
+
+    // Load all project files to ensure we have complete state
+    try {
+      const filesRes = await fetch(`/api/projects/${projectName}/files?recursive=true`);
+      if (filesRes.ok) {
+        const data = await filesRes.json();
+
+        // Load content for all files
+        for (const item of data.files) {
+          if (item.type === 'file' && !projectFiles[item.name]) {
+            const res = await fetch(`/api/projects/${projectName}/files/${item.name}`);
+            if (res.ok) {
+              const fileData = await res.json();
+              projectFiles[item.name] = fileData.content;
+            }
+          }
+        }
+        projectFiles = projectFiles;  // Trigger reactivity
+      }
+    } catch (e) {
+      console.error('[Author] Failed to load project files for run:', e);
+    }
+
+    // PreviewFrame will automatically send files via reactive statement
+    // But we can also explicitly trigger refresh
+    console.log('[Author] Running project with', Object.keys(projectFiles).length, 'files');
+  }
 </script>
 
 <div class="flex flex-col h-screen bg-base-100" data-theme="dark">
@@ -539,7 +575,7 @@
       {/if}
     </div>
     <div class="flex-none flex items-center gap-3 pr-2">
-      <button class="btn btn-sm btn-ghost px-4" on:click={() => console.log('Run')}>
+      <button class="btn btn-sm btn-accent px-4" on:click={handleRun}>
         Run
       </button>
       <button

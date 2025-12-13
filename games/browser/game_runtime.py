@@ -27,6 +27,23 @@ def js_log(msg):
             pass
 
 
+def js_truthy(obj):
+    """Check if a JavaScript object is truthy without using Python's len().
+
+    Python's `if obj:` tries __bool__() or __len__() which JS objects don't have.
+    This function safely checks if a JS object exists and is not null/undefined.
+    """
+    if obj is None:
+        return False
+    if sys.platform == "emscripten":
+        try:
+            # Use JavaScript's own truthiness check
+            return bool(browser_platform.window.Boolean(obj))
+        except:
+            return obj is not None
+    return bool(obj)
+
+
 class BrowserGameRuntime:
     """
     Manages the game lifecycle in the browser.
@@ -242,10 +259,20 @@ class BrowserGameRuntime:
                 self.game.handle_input(input_events)
 
                 # Update game state
-                self.game.update(dt)
+                try:
+                    self.game.update(dt)
+                except Exception as e:
+                    if frame_count <= 5:
+                        js_log(f"[BrowserGameRuntime] update() error: {e}")
 
                 # Render game
-                self.game.render(self.screen)
+                try:
+                    self.game.render(self.screen)
+                    if frame_count <= 3:
+                        js_log(f"[BrowserGameRuntime] render() complete, frame {frame_count}")
+                except Exception as e:
+                    if frame_count <= 5:
+                        js_log(f"[BrowserGameRuntime] render() error: {e}")
 
                 # Broadcast state to JS periodically
                 now = time.monotonic()
@@ -412,27 +439,59 @@ class BrowserGameRuntime:
 
         js_log("[BrowserGameRuntime] Loading IDE project...")
         try:
+            from pathlib import Path
+            from ams.content_fs_browser import get_content_fs
+
             project_path = self._ide_bridge.get_project_path()
-            game_json_path = f"{project_path}/game.json"
+            game_json_path = Path(project_path) / "game.json"
 
             import os
-            if os.path.exists(game_json_path):
+            # Debug: list files in project directory
+            js_log(f"[BrowserGameRuntime] Project path: {project_path}")
+            if os.path.exists(project_path):
+                files = os.listdir(project_path)
+                js_log(f"[BrowserGameRuntime] Project files: {files}")
+            else:
+                js_log(f"[BrowserGameRuntime] Project path does not exist!")
+
+            if game_json_path.exists():
+                # Debug: read and log game.json content
+                with open(game_json_path, 'r') as f:
+                    content = f.read()
+                js_log(f"[BrowserGameRuntime] game.json content (first 500 chars): {content[:500]}")
+
                 from ams.games.game_engine import GameEngine
 
-                # Load game engine from project's game.json
+                # Get ContentFS and add project as game layer
+                content_fs = get_content_fs()
+                content_fs.add_game_layer(project_path)
+                js_log(f"[BrowserGameRuntime] Added game layer: {project_path}")
+
+                # Create game class from YAML/JSON definition
                 game_class = GameEngine.from_yaml(game_json_path)
-                self.game = game_class.create_game(self.width, self.height)
+
+                # Instantiate game with ContentFS and screen dimensions
+                self.game = game_class(
+                    content_fs=content_fs,
+                    width=self.width,
+                    height=self.height
+                )
                 self._ide_mode = True
-                js_log(f"[BrowserGameRuntime] IDE project loaded successfully")
+                self.game_slug = 'ide_project'
+                js_log(f"[BrowserGameRuntime] IDE project loaded successfully: {self.game.NAME}")
 
                 # Notify JS
                 if sys.platform == "emscripten":
                     browser_platform.window.ideBridge.notifyReloaded()
             else:
                 js_log(f"[BrowserGameRuntime] No game.json found at {game_json_path}")
+                if sys.platform == "emscripten":
+                    browser_platform.window.ideBridge.notifyError(f"No game.json found", "game.json", None)
 
         except Exception as e:
+            import traceback
             js_log(f"[BrowserGameRuntime] IDE project load error: {e}")
+            js_log(f"[BrowserGameRuntime] Traceback: {traceback.format_exc()}")
             if sys.platform == "emscripten":
                 browser_platform.window.ideBridge.notifyError(str(e), None, None)
 
@@ -441,20 +500,39 @@ class BrowserGameRuntime:
         if sys.platform != "emscripten":
             return
 
-        if not hasattr(browser_platform.window, 'ideBridge'):
+        # Debug: check every 60 frames if ideMessages exists
+        if not hasattr(self, '_ide_check_count'):
+            self._ide_check_count = 0
+        self._ide_check_count += 1
+        if self._ide_check_count == 1 or self._ide_check_count % 300 == 0:
+            has_messages = hasattr(browser_platform.window, 'ideMessages')
+            js_log(f"[BrowserGameRuntime] IDE check #{self._ide_check_count}: ideMessages exists={has_messages}")
+
+        if not hasattr(browser_platform.window, 'ideMessages'):
             return
 
         try:
-            # Check for pending IDE messages
-            if browser_platform.window.ideBridge.hasPendingMessages():
-                msg = browser_platform.window.ideBridge.getNextMessage()
-                if msg:
+            # Access the message queue directly (JS array)
+            messages = browser_platform.window.ideMessages
+            msg_count = messages.length
+            if msg_count > 0:
+                js_log(f"[BrowserGameRuntime] Processing {msg_count} IDE messages")
+            # Use JS array's length property instead of Python len()
+            while messages.length > 0:
+                js_msg = messages.shift()  # JS array shift() returns JS object
+                if js_msg is not None:
+                    # Convert JS object to Python dict at the boundary
+                    import json
+                    msg_json = browser_platform.window.JSON.stringify(js_msg)
+                    msg = json.loads(msg_json)
                     await self._handle_ide_message(msg)
         except Exception as e:
+            import traceback
             js_log(f"[BrowserGameRuntime] IDE message processing error: {e}")
+            js_log(f"[BrowserGameRuntime] Traceback: {traceback.format_exc()}")
 
-    async def _handle_ide_message(self, msg):
-        """Handle a message from the IDE."""
+    async def _handle_ide_message(self, msg: dict):
+        """Handle a message from the IDE (already converted to Python dict)."""
         msg_type = msg.get('type', '')
         js_log(f"[BrowserGameRuntime] IDE message: {msg_type}")
 

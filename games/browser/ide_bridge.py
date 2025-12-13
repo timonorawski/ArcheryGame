@@ -38,7 +38,13 @@ class IDEBridge:
         """
         self.content_fs = content_fs
         self.reload_callback = reload_callback
-        self._project_path = 'ide_project'  # Subdirectory for IDE project files
+
+        # Generate unique project slug to avoid collisions
+        import time
+        import random
+        timestamp = int(time.time() * 1000) % 100000
+        rand_suffix = random.randint(100, 999)
+        self._project_path = f'ide_project_{timestamp}_{rand_suffix}'
 
         # Ensure project directory exists
         import os
@@ -75,13 +81,17 @@ class IDEBridge:
             for path, content in files.items():
                 # Prepend project path
                 full_path = f"{self._project_path}/{path}"
+                self._log(f"Writing file: {path} -> {full_path}")
 
                 # Convert dict/list to JSON string for storage
                 if isinstance(content, (dict, list)):
                     content = json.dumps(content, indent=2)
+                    self._log(f"  Content type: dict/list, converted to JSON")
+                else:
+                    self._log(f"  Content type: {type(content).__name__}, length: {len(content) if content else 0}")
 
                 self.content_fs.writetext(full_path, content)
-                self._log(f"Wrote: {full_path}")
+                self._log(f"  Write complete")
                 files_written += 1
 
             self._log(f"Received {files_written} files")

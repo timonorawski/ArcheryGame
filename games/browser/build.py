@@ -268,6 +268,18 @@ def _copy_ams_modules(output_dir: Path):
         shutil.copy2(logging_module, ams_dst / "logging.py")
         print(f"  Copied: ams/logging.py")
 
+    # Copy yaml module (unified YAML loader with schema validation)
+    yaml_module = ams_src / "yaml.py"
+    if yaml_module.exists():
+        shutil.copy2(yaml_module, ams_dst / "yaml.py")
+        print(f"  Copied: ams/yaml.py")
+
+    # Copy profiling module (timing/performance utilities)
+    profiling_module = ams_src / "profiling.py"
+    if profiling_module.exists():
+        shutil.copy2(profiling_module, ams_dst / "profiling.py")
+        print(f"  Copied: ams/profiling.py")
+
     # Copy lua module (browser version - lua_bridge.py is at root level in build)
     lua_src = ams_src / "lua"
     lua_dst = ams_dst / "lua"
@@ -370,6 +382,24 @@ def _patch_pygbag_index(served_dir: Path, build_id: str = "unknown"):
         )
         print(f"  Added data-cdn attribute to force CDN-only mode")
 
+    # Check if ide_bridge.js script tag needs to be added
+    if "ide_bridge.js" not in content:
+        # Add ide_bridge.js script after existing error handler or at start
+        if "AMS_EARLY_ERROR_CAPTURE" in content:
+            # Insert after the existing early error script
+            ide_script = '<script src="ide_bridge.js"></script>\n'
+            # Find the end of the early error script and insert after
+            insert_marker = "AMS_EARLY_ERROR_CAPTURE"
+            marker_pos = content.find(insert_marker)
+            # Find the closing </script> after the marker
+            close_script = content.find("</script>", marker_pos)
+            if close_script != -1:
+                insert_pos = close_script + len("</script>") + 1
+                content = content[:insert_pos] + ide_script + content[insert_pos:]
+                index_path.write_text(content)
+                print(f"  Added ide_bridge.js script tag to existing patched HTML")
+            return
+
     # Skip error handler injection if already patched
     if "AMS_EARLY_ERROR_CAPTURE" in content:
         index_path.write_text(content)
@@ -421,14 +451,19 @@ def _patch_pygbag_index(served_dir: Path, build_id: str = "unknown"):
     </script>
 '''
 
+    # IDE bridge script - loaded after early error handler but before pythons.js
+    ide_bridge_script = '''<script src="ide_bridge.js"></script>
+'''
+
     # Insert at the start of the document
     # pygbag doesn't use standard <head>, so insert right after <html...>
     html_match = re.search(r'(<html[^>]*>)', content)
     if html_match:
         insert_pos = html_match.end()
-        content = content[:insert_pos] + "\n" + early_handler + content[insert_pos:]
+        content = content[:insert_pos] + "\n" + early_handler + ide_bridge_script + content[insert_pos:]
         index_path.write_text(content)
         print(f"  Patched index.html with early error handlers")
+        print(f"  Added ide_bridge.js script tag")
 
 
 def _copy_static_assets(output_dir: Path, build_id: str = "unknown"):

@@ -237,8 +237,14 @@ async def delete_project(project_name: str):
 # ============================================================================
 
 @app.get("/api/projects/{project_name}/files")
-async def list_files(project_name: str, path: str = ""):
-    """List files in a project directory."""
+async def list_files(project_name: str, path: str = "", recursive: bool = False):
+    """List files in a project directory.
+
+    Args:
+        project_name: Name of the project
+        path: Subdirectory path (optional)
+        recursive: If True, list all files recursively
+    """
     project_dir = PROJECTS_DIR / project_name
     target_dir = project_dir / path if path else project_dir
 
@@ -249,14 +255,28 @@ async def list_files(project_name: str, path: str = ""):
         raise HTTPException(status_code=404, detail="Directory not found")
 
     files = []
-    for item in sorted(target_dir.iterdir()):
-        rel_path = str(item.relative_to(project_dir))
-        files.append({
-            "name": item.name,
-            "path": rel_path,
-            "type": "folder" if item.is_dir() else "file",
-            "size": item.stat().st_size if item.is_file() else None
-        })
+
+    if recursive:
+        # Recursively list all files
+        for item in sorted(target_dir.rglob("*")):
+            if item.is_file():
+                rel_path = str(item.relative_to(project_dir))
+                files.append({
+                    "name": rel_path,  # Full relative path for recursive listing
+                    "path": rel_path,
+                    "type": "file",
+                    "size": item.stat().st_size
+                })
+    else:
+        # Single directory listing
+        for item in sorted(target_dir.iterdir()):
+            rel_path = str(item.relative_to(project_dir))
+            files.append({
+                "name": item.name,
+                "path": rel_path,
+                "type": "folder" if item.is_dir() else "file",
+                "size": item.stat().st_size if item.is_file() else None
+            })
 
     return {"files": files, "path": path}
 

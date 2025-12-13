@@ -199,6 +199,9 @@ class GameEngine(BaseGame):
         self._inline_input_action_counter = 0
         self._inline_generator_counter = 0
 
+        # Frame counter for profiling
+        self._frame_count = 0
+
         # Add game directory as ContentFS layer (higher priority than engine)
         # This allows games to override engine lua scripts at lua/{type}/
         if self.GAME_SLUG:
@@ -1502,6 +1505,9 @@ class GameEngine(BaseGame):
 
         # End profiling frame
         profiling.end_frame()
+
+        # Increment frame counter
+        self._frame_count += 1
 
     @profiling.profile("game_engine", "Frame Update")
     def _do_frame_update(self, dt: float) -> None:

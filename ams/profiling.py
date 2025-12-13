@@ -28,13 +28,35 @@ Usage:
 """
 
 import os
+import sys
 import time
-import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from collections import deque
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, TypeVar, cast
+
+# Threading is not available in WASM/browser environment
+if sys.platform != "emscripten":
+    import threading
+    _context = threading.local()
+    _call_id_lock = threading.Lock()
+else:
+    # Stub for WASM - single-threaded, no locking needed
+    threading = None  # type: ignore
+
+    # Simple namespace object for single-threaded context
+    class _WasmContext:
+        pass
+    _context = _WasmContext()
+
+    # No-op lock for single-threaded WASM
+    class _NoOpLock:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+    _call_id_lock = _NoOpLock()
 
 # Module name for sink registry
 PROFILE_MODULE = 'profile'
@@ -42,12 +64,8 @@ PROFILE_MODULE = 'profile'
 # Check if enabled via environment
 _enabled = os.getenv("AMS_LOGGING_PROFILE_ENABLED", "").lower() in ("1", "true", "yes")
 
-# Thread-local storage for call stack context
-_context = threading.local()
-
 # Global call ID counter
 _call_id_counter = 0
-_call_id_lock = threading.Lock()
 
 # Frame buffer for historical queries (last 60 frames)
 _frame_buffer: deque = deque(maxlen=60)

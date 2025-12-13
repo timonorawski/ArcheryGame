@@ -107,6 +107,12 @@
         window.ideBridge = {
             sendToIDE: sendToIDE,
 
+            // Python-safe version that accepts JSON string
+            sendToIDEFromPython: function(type, dataJson) {
+                const data = dataJson ? JSON.parse(dataJson) : {};
+                sendToIDE(type, data);
+            },
+
             // Called by Python after processing files
             notifyFilesReceived: function(filesWritten) {
                 sendToIDE('files_received', {filesWritten: filesWritten});
@@ -145,13 +151,9 @@
             }
         };
 
-        // Signal ready to IDE
-        sendToIDE('ready', {
-            bridgeVersion: '1.0',
-            timestamp: Date.now()
-        });
-
-        console.log('[IDE Bridge] Initialized and ready');
+        // Note: We do NOT send 'ready' here - Python will send it after initialization
+        // This prevents PreviewFrame from sending files before Python is ready to receive them
+        console.log('[IDE Bridge] Initialized (waiting for Python to signal ready)');
     }
 
     // Initialize on load

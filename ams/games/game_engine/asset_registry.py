@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, TYPE_CHECKING, Tuple
 
-from ams.yaml import loads as yaml_loads
+from ams.yaml import loads as yaml_loads, HAS_YAML
 from ams.games.game_engine.config import SpriteConfig, SoundConfig
 
 if TYPE_CHECKING:
@@ -101,10 +101,13 @@ class AssetRegistry:
         if not self._content_fs.exists(assets_path):
             return
 
-        # Walk all YAML files in assets/
+        # Walk all YAML and JSON files in assets/
+        # Browser builds convert YAML to JSON, so we need to look for both
+        extensions = ['*.yaml', '*.json'] if HAS_YAML else ['*.json']
         try:
-            for yaml_path in self._content_fs.walk_files(assets_path, filter_glob=['*.yaml']):
-                self._process_registration_file_content_fs(yaml_path)
+            for ext in extensions:
+                for file_path in self._content_fs.walk_files(assets_path, filter_glob=[ext]):
+                    self._process_registration_file_content_fs(file_path)
         except Exception as e:
             print(f"[AssetRegistry] Error walking {assets_path}: {e}")
 
@@ -113,41 +116,49 @@ class AssetRegistry:
         if not assets_dir.exists():
             return
 
-        for yaml_path in assets_dir.rglob('*.yaml'):
-            self._process_registration_file_filesystem(yaml_path, assets_dir)
+        # Look for both YAML and JSON files
+        # Browser builds convert YAML to JSON, so we need to look for both
+        extensions = ['*.yaml', '*.json'] if HAS_YAML else ['*.json']
+        for ext in extensions:
+            for file_path in assets_dir.rglob(ext):
+                self._process_registration_file_filesystem(file_path, assets_dir)
 
-    def _process_registration_file_content_fs(self, yaml_path: str) -> None:
-        """Process a single registration YAML file via ContentFS."""
+    def _process_registration_file_content_fs(self, file_path: str) -> None:
+        """Process a single registration file (YAML or JSON) via ContentFS."""
         try:
-            content = self._content_fs.readtext(yaml_path)
-            data = yaml_loads(content, format='yaml')
+            content = self._content_fs.readtext(file_path)
+            # Detect format from extension
+            fmt = 'json' if file_path.endswith('.json') else 'yaml'
+            data = yaml_loads(content, format=fmt)
 
             if not data or not isinstance(data, dict):
                 return
 
             # Determine asset type and register
-            asset_type = self._detect_asset_type(data, yaml_path)
+            asset_type = self._detect_asset_type(data, file_path)
             if asset_type == 'sprite':
-                self._register_sprite(data, yaml_path)
+                self._register_sprite(data, file_path)
             elif asset_type == 'sound':
-                self._register_sound(data, yaml_path)
+                self._register_sound(data, file_path)
             elif asset_type == 'image':
-                self._register_image(data, yaml_path)
+                self._register_image(data, file_path)
 
         except Exception as e:
-            print(f"[AssetRegistry] Failed to process {yaml_path}: {e}")
+            print(f"[AssetRegistry] Failed to process {file_path}: {e}")
 
-    def _process_registration_file_filesystem(self, yaml_path: Path, assets_dir: Path) -> None:
-        """Process a single registration YAML file via filesystem."""
+    def _process_registration_file_filesystem(self, file_path: Path, assets_dir: Path) -> None:
+        """Process a single registration file (YAML or JSON) via filesystem."""
         try:
-            content = yaml_path.read_text()
-            data = yaml_loads(content, format='yaml')
+            content = file_path.read_text()
+            # Detect format from extension
+            fmt = 'json' if file_path.suffix == '.json' else 'yaml'
+            data = yaml_loads(content, format=fmt)
 
             if not data or not isinstance(data, dict):
                 return
 
             # Convert to virtual path for detection
-            rel_path = str(yaml_path.relative_to(assets_dir.parent))
+            rel_path = str(file_path.relative_to(assets_dir.parent))
 
             # Determine asset type and register
             asset_type = self._detect_asset_type(data, rel_path)
@@ -159,9 +170,9 @@ class AssetRegistry:
                 self._register_image(data, rel_path)
 
         except Exception as e:
-            print(f"[AssetRegistry] Failed to process {yaml_path}: {e}")
+            print(f"[AssetRegistry] Failed to process {file_path}: {e}")
 
-    def _detect_asset_type(self, data: Dict[str, Any], yaml_path: str) -> Optional[str]:
+    def _detect_asset_type(self, data: Dict[str, Any], file_path: str) -> Optional[str]:
         """Detect asset type from file content or path.
 
         Priority:
@@ -169,10 +180,10 @@ class AssetRegistry:
         2. Content-based detection (x/y/frames → sprite, volume/loop → sound)
         3. File extension heuristic
         """
-        path_lower = yaml_path.lower()
+        path_lower = file_path.lower()
 
-        # Path-based detection
-        if '/sprites/' in path_lower or path_lower.endswith('/sprites.yaml'):
+        # Path-based detection (works for both YAML and JSON)
+        if '/sprites/' in path_lower or path_lower.endswith('/sprites.yaml') or path_lower.endswith('/sprites.json'):
             return 'sprite'
         if '/sounds/' in path_lower:
             return 'sound'
@@ -204,8 +215,8 @@ class AssetRegistry:
 
         return None
 
-    def _register_sprite(self, data: Dict[str, Any], yaml_path: str) -> None:
-        """Register sprite(s) from YAML data.
+    def _register_sprite(self, data: Dict[str, Any], file_path: str) -> None:
+        """Register sprite(s) from definition data.
 
         Handles both individual sprites and sprite sheets with multiple regions.
         """
@@ -238,7 +249,7 @@ class AssetRegistry:
                     self._extends_map[sprite_name] = sprite_data['extends']
         else:
             # Single sprite definition
-            name = data.get('name') or Path(yaml_path).stem
+            name = data.get('name') or Path(file_path).stem
 
             config = SpriteConfig(
                 file=data.get('file', ''),
@@ -257,9 +268,9 @@ class AssetRegistry:
             if 'extends' in data:
                 self._extends_map[name] = data['extends']
 
-    def _register_sound(self, data: Dict[str, Any], yaml_path: str) -> None:
-        """Register a sound from YAML data."""
-        name = data.get('name') or Path(yaml_path).stem
+    def _register_sound(self, data: Dict[str, Any], file_path: str) -> None:
+        """Register a sound from definition data."""
+        name = data.get('name') or Path(file_path).stem
 
         config = SoundConfig(
             file=data.get('file', ''),
@@ -268,9 +279,9 @@ class AssetRegistry:
 
         self._registered.sounds[name] = config
 
-    def _register_image(self, data: Dict[str, Any], yaml_path: str) -> None:
+    def _register_image(self, data: Dict[str, Any], file_path: str) -> None:
         """Register a raw image asset."""
-        name = data.get('name') or Path(yaml_path).stem
+        name = data.get('name') or Path(file_path).stem
 
         asset = ImageAsset(
             name=name,

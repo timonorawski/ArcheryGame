@@ -6,61 +6,121 @@
   const dispatch = createEventDispatcher();
 
   export let projectFiles = {};
-  export let engineUrl = '/pygbag/';
+  export let engineUrl = '/pygbag/?mode=ide';
 
   let iframe;
   let isLoading = true;
   let engineReady = false;
   let error = null;
-  let reloadTimeout;
+  let initialFilesSent = false;  // Track if we've sent initial files
+  let lastFilesHash = '';  // Track file content to detect changes
 
-  $: if (projectFiles && iframe && engineReady) {
-    clearTimeout(reloadTimeout);
-    reloadTimeout = setTimeout(() => {
-      sendProjectFiles();
-    }, 500);
+  // Convert YAML files to JSON
+  function prepareFiles() {
+    const jsonFiles = {};
+    for (const [path, content] of Object.entries(projectFiles)) {
+      if (path.endsWith('.yaml') || path.endsWith('.yml')) {
+        const jsonPath = path.replace(/\.ya?ml$/, '.json');
+        try {
+          const parsed = yaml.load(content);
+          jsonFiles[jsonPath] = parsed;
+        } catch (e) {
+          console.error(`Failed to parse YAML: ${path}`, e);
+          dispatch('parseError', { path, error: e.message });
+          continue;
+        }
+      } else {
+        jsonFiles[path] = content;
+      }
+    }
+    return jsonFiles;
   }
 
-  function sendProjectFiles() {
-    if (!iframe?.contentWindow) return;
+  // Compute a hash of file contents to detect changes
+  function computeFilesHash(files) {
+    const keys = Object.keys(files).sort();
+    const content = keys.map(k => `${k}:${files[k]}`).join('|');
+    // Simple hash - just use length + first/last chars for quick comparison
+    return `${content.length}-${content.slice(0, 100)}-${content.slice(-100)}`;
+  }
+
+  // Send files to engine (for initial load)
+  function sendFilesAndReload() {
+    console.log('[PreviewFrame] sendFilesAndReload called, initialFilesSent=', initialFilesSent);
+    if (!iframe?.contentWindow) {
+      console.log('[PreviewFrame] No iframe contentWindow');
+      return;
+    }
+    if (initialFilesSent) {
+      console.log('[PreviewFrame] Initial files already sent, skipping');
+      return;
+    }
 
     try {
-      const jsonFiles = {};
-      for (const [path, content] of Object.entries(projectFiles)) {
-        if (path.endsWith('.yaml') || path.endsWith('.yml')) {
-          const jsonPath = path.replace(/\.ya?ml$/, '.json');
-          try {
-            const parsed = yaml.load(content);
-            jsonFiles[jsonPath] = parsed;
-          } catch (e) {
-            console.error(`Failed to parse YAML: ${path}`, e);
-            dispatch('parseError', { path, error: e.message });
-            continue;
-          }
-        } else {
-          jsonFiles[path] = content;
-        }
-      }
+      const jsonFiles = prepareFiles();
+      console.log('[PreviewFrame] Prepared files:', Object.keys(jsonFiles));
 
+      // Send files
+      iframe.contentWindow.postMessage({
+        source: 'ams_ide',
+        type: 'project_files',
+        files: jsonFiles
+      }, '*');
+      console.log('[PreviewFrame] Posted project_files message');
+
+      // Send reload to trigger game load
+      iframe.contentWindow.postMessage({
+        source: 'ams_ide',
+        type: 'reload'
+      }, '*');
+      console.log('[PreviewFrame] Posted reload message');
+
+      initialFilesSent = true;
+      lastFilesHash = computeFilesHash(projectFiles);
+      console.log('[PreviewFrame] Done, initialFilesSent=true');
+    } catch (e) {
+      console.error('[PreviewFrame] Error sending files:', e);
+      error = e.message;
+    }
+  }
+
+  // Send updated files to engine (for hot reload)
+  function sendFileUpdate() {
+    if (!iframe?.contentWindow || !engineReady) {
+      return;
+    }
+
+    try {
+      const jsonFiles = prepareFiles();
+      console.log('[PreviewFrame] Sending file update:', Object.keys(jsonFiles));
+
+      // Send files
       iframe.contentWindow.postMessage({
         source: 'ams_ide',
         type: 'project_files',
         files: jsonFiles
       }, '*');
 
-      console.log('[PreviewFrame] Sent project files:', Object.keys(jsonFiles));
+      // Send reload to trigger game reload
+      iframe.contentWindow.postMessage({
+        source: 'ams_ide',
+        type: 'reload'
+      }, '*');
+
+      lastFilesHash = computeFilesHash(projectFiles);
+      console.log('[PreviewFrame] File update sent');
     } catch (e) {
-      console.warn('Could not send project files:', e);
-      error = e.message;
+      console.error('[PreviewFrame] Error sending file update:', e);
     }
   }
 
-  function requestReload() {
-    if (!iframe?.contentWindow) return;
-    iframe.contentWindow.postMessage({
-      source: 'ams_ide',
-      type: 'reload'
-    }, '*');
+  // Watch for file changes after initial load
+  $: if (initialFilesSent && engineReady && Object.keys(projectFiles).length > 0) {
+    const newHash = computeFilesHash(projectFiles);
+    if (newHash !== lastFilesHash) {
+      console.log('[PreviewFrame] Files changed, sending update');
+      sendFileUpdate();
+    }
   }
 
   function handleMessage(event) {
@@ -74,14 +134,10 @@
       case 'ready':
         engineReady = true;
         isLoading = false;
+        // Send files when engine is ready
         if (Object.keys(projectFiles).length > 0) {
-          sendProjectFiles();
+          sendFilesAndReload();
         }
-        break;
-
-      case 'files_received':
-        console.log('[PreviewFrame] Files received:', msg.filesWritten);
-        requestReload();
         break;
 
       case 'reloaded':
@@ -117,10 +173,13 @@
     isLoading = false;
   }
 
-  function reload() {
+  // Full reload - restarts the iframe completely
+  export function reload() {
     error = null;
     isLoading = true;
     engineReady = false;
+    initialFilesSent = false;  // Reset so we send files again
+    lastFilesHash = '';
     if (iframe) {
       iframe.src = iframe.src;
     }
@@ -132,7 +191,6 @@
 
   onDestroy(() => {
     window.removeEventListener('message', handleMessage);
-    clearTimeout(reloadTimeout);
   });
 </script>
 
@@ -153,16 +211,8 @@
       {/if}
     </div>
     <div class="flex gap-2">
-      <button
-        class="btn btn-xs btn-ghost"
-        on:click={sendProjectFiles}
-        title="Send Files"
-        disabled={!engineReady}
-      >
-        Send
-      </button>
-      <button class="btn btn-xs btn-ghost" on:click={reload} title="Reload">
-        Reload
+      <button class="btn btn-xs btn-ghost" on:click={reload} title="Restart game">
+        Restart
       </button>
     </div>
   </div>

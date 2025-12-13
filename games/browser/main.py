@@ -91,39 +91,129 @@ async def main():
             clock.tick(30)
 
     # Get game selection from URL params or default
-    game_slug = get_url_param('game', 'containment')
-    level_slug = get_url_param('level', None)
-    level_group = get_url_param('level_group', None)
+    # IDE mode: ?mode=ide skips auto-loading game and waits for IDE to send files
 
-    js_log(f"[main.py] Loading game: {game_slug}")
-
-    # Create and run the game runtime
-    js_log("[main.py] Creating BrowserGameRuntime...")
-    runtime = BrowserGameRuntime(screen)
-    js_log("[main.py] BrowserGameRuntime created, calling load_game...")
-    await runtime.load_game(game_slug, level=level_slug, level_group=level_group)
-    js_log("[main.py] load_game complete, starting run loop...")
-
-    # Signal to IDE that engine is ready (game loaded, about to start loop)
+    # Debug: log the raw URL
     if sys.platform == "emscripten":
         try:
             import platform as browser_platform
-            # Wait briefly for IDE bridge to load (injected in inject_fengari_scripts)
-            for _ in range(20):  # Max 2 seconds
-                if hasattr(browser_platform.window, 'ideBridge'):
-                    break
-                await asyncio.sleep(0.1)
-
-            if hasattr(browser_platform.window, 'ideBridge'):
-                browser_platform.window.ideBridge.sendToIDE('ready', {
-                    'game': game_slug,
-                    'engineReady': True
-                })
-                js_log("[main.py] Sent engine ready signal to IDE")
-            else:
-                js_log("[main.py] IDE bridge not available (standalone mode)")
+            raw_href = browser_platform.window.location.href
+            raw_search = browser_platform.window.location.search
+            js_log(f"[main.py] URL DEBUG: href={raw_href}")
+            js_log(f"[main.py] URL DEBUG: search={raw_search}")
         except Exception as e:
-            js_log(f"[main.py] Could not send ready signal: {e}")
+            js_log(f"[main.py] URL DEBUG error: {e}")
+
+    ide_mode = get_url_param('mode', None) == 'ide'
+    js_log(f"[main.py] ide_mode={ide_mode}")
+    game_slug = get_url_param('game', None if ide_mode else 'containment')
+    level_slug = get_url_param('level', None)
+    level_group = get_url_param('level_group', None)
+
+    # IDE mode: wait for files before loading game
+    if ide_mode and sys.platform == "emscripten":
+        import platform as browser_platform
+        import json
+        js_log("[main.py] IDE mode - waiting for project files...")
+
+        # Initialize IDE bridge and ContentFS
+        from ams.content_fs_browser import get_content_fs
+        from ide_bridge import init_bridge
+
+        content_fs = get_content_fs()
+
+        # Wait for IDE bridge JS to be ready
+        for _ in range(50):  # Max 5 seconds
+            if hasattr(browser_platform.window, 'ideBridge'):
+                break
+            await asyncio.sleep(0.1)
+
+        if not hasattr(browser_platform.window, 'ideBridge'):
+            js_log("[main.py] ERROR: IDE bridge not available")
+            return
+
+        # Signal ready to IDE
+        browser_platform.window.ideBridge.sendToIDEFromPython('ready', json.dumps({'waitingForFiles': True}))
+        js_log("[main.py] Signaled ready, waiting for files...")
+
+        # Wait for files message
+        ide_bridge = None
+        project_path = None
+        for _ in range(600):  # Max 60 seconds
+            if hasattr(browser_platform.window, 'ideMessages'):
+                messages = browser_platform.window.ideMessages
+                while messages.length > 0:
+                    js_msg = messages.shift()
+                    if js_msg is not None:
+                        msg_json = browser_platform.window.JSON.stringify(js_msg)
+                        msg = json.loads(msg_json)
+                        js_log(f"[main.py] IDE message: {msg.get('type')}")
+
+                        if msg.get('type') == 'files':
+                            # Initialize bridge if needed
+                            if ide_bridge is None:
+                                ide_bridge = init_bridge(content_fs, None)
+                                project_path = ide_bridge.get_project_path()
+                                js_log(f"[main.py] IDE bridge initialized, project: {project_path}")
+
+                            # Write files
+                            files = msg.get('files', {})
+                            result = ide_bridge.receive_files(json.dumps(files))
+                            js_log(f"[main.py] Files written: {result}")
+
+                        elif msg.get('type') == 'reload' and project_path:
+                            # Files received, now load the game
+                            js_log("[main.py] Reload requested, loading game...")
+                            break
+                else:
+                    # No break, continue waiting
+                    await asyncio.sleep(0.1)
+                    continue
+                # Break from outer loop if inner loop broke
+                break
+            await asyncio.sleep(0.1)
+
+        if not project_path:
+            js_log("[main.py] ERROR: No files received from IDE")
+            return
+
+        # Load game from IDE project
+        js_log("[main.py] Creating runtime and loading IDE project...")
+        runtime = BrowserGameRuntime(screen)
+
+        # Add project as game layer and load
+        from pathlib import Path
+        from ams.games.game_engine import GameEngine
+
+        content_fs.add_game_layer(project_path)
+        game_json_path = Path(project_path) / "game.json"
+
+        if game_json_path.exists():
+            game_class = GameEngine.from_yaml(game_json_path)
+            runtime.game = game_class(
+                content_fs=content_fs,
+                width=runtime.width,
+                height=runtime.height
+            )
+            runtime.game_slug = 'ide_project'
+            runtime._ide_mode = True
+            js_log(f"[main.py] IDE game loaded: {runtime.game.NAME}")
+
+            # Notify IDE
+            browser_platform.window.ideBridge.notifyReloaded()
+        else:
+            js_log(f"[main.py] ERROR: No game.json at {game_json_path}")
+            return
+
+    else:
+        # Normal mode: create runtime and load game
+        js_log("[main.py] Creating BrowserGameRuntime...")
+        runtime = BrowserGameRuntime(screen)
+
+        if game_slug:
+            js_log(f"[main.py] Loading game: {game_slug}")
+            await runtime.load_game(game_slug, level=level_slug, level_group=level_group)
+            js_log("[main.py] Game loaded, starting run loop...")
 
     await runtime.run()
 
