@@ -12,6 +12,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         play: resolve(__dirname, 'play.html'),
         author: resolve(__dirname, 'author.html'),
+        profiler: resolve(__dirname, 'profiler.html'),
       },
     },
   },

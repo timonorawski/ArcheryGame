@@ -371,6 +371,17 @@ async def serve_author():
     return FileResponse(author_html)
 
 
+# Serve profiler.html at /profiler
+@app.get("/profiler")
+@app.get("/profiler.html")
+async def serve_profiler():
+    """Serve the profiler frontend."""
+    profiler_html = FRONTEND_DIR / "profiler.html"
+    if not profiler_html.exists():
+        raise HTTPException(status_code=404, detail="Profiler not built. Run: npm run build")
+    return FileResponse(profiler_html)
+
+
 # Mount static assets
 if FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")

@@ -1,0 +1,42 @@
+[
+  {
+    "type": "frame",
+    "frame": 1,
+    "timestamp": 1702400000.0,
+    "duration_ms": 12.5,
+    "calls": [
+      {"id": 1, "parent_id": null, "label": "GameEngine.update", "module": "game_engine", "func": "update", "start": 0.0, "duration": 12.5, "args": {}, "entity_id": null, "lua_code": false, "lua_callback": false},
+      {"id": 2, "parent_id": 1, "label": "update_entities", "module": "game_engine", "func": "update_entities", "start": 0.5, "duration": 8.0, "args": {}, "entity_id": null, "lua_code": false, "lua_callback": false},
+      {"id": 3, "parent_id": 2, "label": "on_update(duck_1)", "module": "lua_engine", "func": "on_update", "start": 1.0, "duration": 2.5, "args": {}, "entity_id": "duck_1", "lua_code": true, "lua_callback": false},
+      {"id": 4, "parent_id": 3, "label": "ams.get_x", "module": "lua_api", "func": "get_x", "start": 1.2, "duration": 0.1, "args": {}, "entity_id": "duck_1", "lua_code": false, "lua_callback": true},
+      {"id": 5, "parent_id": 3, "label": "ams.set_vy", "module": "lua_api", "func": "set_vy", "start": 1.5, "duration": 0.15, "args": {}, "entity_id": "duck_1", "lua_code": false, "lua_callback": true},
+      {"id": 6, "parent_id": 2, "label": "on_update(duck_2)", "module": "lua_engine", "func": "on_update", "start": 4.0, "duration": 2.0, "args": {}, "entity_id": "duck_2", "lua_code": true, "lua_callback": false},
+      {"id": 7, "parent_id": 1, "label": "check_collisions", "module": "game_engine", "func": "check_collisions", "start": 9.0, "duration": 2.0, "args": {}, "entity_id": null, "lua_code": false, "lua_callback": false},
+      {"id": 8, "parent_id": 1, "label": "render", "module": "game_engine", "func": "render", "start": 11.0, "duration": 1.0, "args": {}, "entity_id": null, "lua_code": false, "lua_callback": false}
+    ],
+    "rollback": null
+  },
+  {
+    "type": "frame",
+    "frame": 2,
+    "timestamp": 1702400000.016,
+    "duration_ms": 18.2,
+    "calls": [
+      {"id": 9, "parent_id": null, "label": "GameEngine.update", "module": "game_engine", "func": "update", "start": 0.0, "duration": 18.2, "args": {}, "entity_id": null, "lua_code": false, "lua_callback": false},
+      {"id": 10, "parent_id": 9, "label": "update_entities", "module": "game_engine", "func": "update_entities", "start": 0.5, "duration": 14.0, "args": {}, "entity_id": null, "lua_code": false, "lua_callback": false},
+      {"id": 11, "parent_id": 10, "label": "on_update(duck_1)", "module": "lua_engine", "func": "on_update", "start": 1.0, "duration": 6.5, "args": {}, "entity_id": "duck_1", "lua_code": true, "lua_callback": false},
+      {"id": 12, "parent_id": 10, "label": "on_update(duck_2)", "module": "lua_engine", "func": "on_update", "start": 8.0, "duration": 5.5, "args": {}, "entity_id": "duck_2", "lua_code": true, "lua_callback": false}
+    ],
+    "rollback": null
+  },
+  {
+    "type": "frame",
+    "frame": 3,
+    "timestamp": 1702400000.034,
+    "duration_ms": 45.8,
+    "calls": [
+      {"id": 13, "parent_id": null, "label": "GameEngine.update", "module": "game_engine", "func": "update", "start": 0.0, "duration": 45.8, "args": {}, "entity_id": null, "lua_code": false, "lua_callback": false}
+    ],
+    "rollback": {"triggered": true, "target_timestamp": 1702400000.0, "frames_resimulated": 2, "snapshot_age_ms": 34.0}
+  }
+]
