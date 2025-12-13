@@ -294,10 +294,14 @@ def _copy_ams_modules(output_dir: Path):
     print(f"  Copied: ams/lua/entity.py")
 
     # Create __init__.py that redirects engine to browser version
+    # Must also export LuaAPIBase from api.py for GameLuaAPI to extend
     (lua_dst / "__init__.py").write_text(
         '"""Browser Lua module - uses Fengari via JavaScript."""\n'
         'from lua_bridge import LuaEngineBrowser as LuaEngine\n'
         'from lua_bridge import EntityBrowser as Entity\n'
+        'from ams.lua.api import LuaAPIBase, lua_safe_function, _to_lua_value\n'
+        '\n'
+        '__all__ = ["LuaEngine", "Entity", "LuaAPIBase", "lua_safe_function", "_to_lua_value"]\n'
     )
     print(f"  Created: ams/lua/__init__.py (browser redirect)")
 
@@ -310,6 +314,16 @@ def _copy_ams_modules(output_dir: Path):
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "test_*", "tests"),
         )
         print(f"  Copied: ams/games/ (entire package)")
+
+    # Copy entire ams/interactions subpackage (used by game_engine)
+    interactions_src = ams_src / "interactions"
+    interactions_dst = ams_dst / "interactions"
+    if interactions_src.exists():
+        shutil.copytree(
+            interactions_src, interactions_dst,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "test_*", "tests"),
+        )
+        print(f"  Copied: ams/interactions/ (entire package)")
 
     # Copy Fengari JavaScript bridge (replaces WASMOON)
     fengari_js = BROWSER_DIR / "fengari_bridge.js"
