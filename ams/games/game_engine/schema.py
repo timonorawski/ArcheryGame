@@ -71,14 +71,14 @@ def validate_game_yaml(data: Dict[str, Any], source_path: Optional[Path] = None)
 
         # Load schemas from lua/ directory (referenced by game.schema.json)
         # The game.schema.json uses $ref: "../lua/lua_script_inline.schema.json"
-        # which resolves to https://ams.games/lua/... based on game.schema.json's $id
+        # which resolves to https://yamplay.cc/lua/... based on game.schema.json's $id
         lua_dir = _SCHEMAS_DIR.parent / 'lua'
         for schema_file in lua_dir.glob('*.schema.json'):
             loaded = load_schema(schema_file)
             # Map by relative path as used in $ref: "../lua/..."
             schema_store[f"../lua/{schema_file.name}"] = loaded
             # Map by resolved URL (relative to game.schema.json's $id)
-            schema_store[f"https://ams.games/lua/{schema_file.name}"] = loaded
+            schema_store[f"https://yamplay.cc/lua/{schema_file.name}"] = loaded
             # Also map by $id if present
             if '$id' in loaded:
                 schema_store[loaded['$id']] = loaded

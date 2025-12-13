@@ -183,24 +183,39 @@ async def main():
 
         # Add project as game layer and load
         from pathlib import Path
-        from ams.games.game_engine import GameEngine
+
+        try:
+            from ams.games.game_engine import GameEngine
+            js_log("[main.py] GameEngine imported successfully")
+        except Exception as e:
+            js_log(f"[main.py] ERROR importing GameEngine: {e}")
+            import traceback
+            traceback.print_exc()
+            browser_platform.window.ideBridge.notifyError(f"Import error: {e}", None, None)
+            return
 
         content_fs.add_game_layer(project_path)
         game_json_path = Path(project_path) / "game.json"
 
         if game_json_path.exists():
-            game_class = GameEngine.from_yaml(game_json_path)
-            runtime.game = game_class(
-                content_fs=content_fs,
-                width=runtime.width,
-                height=runtime.height
-            )
-            runtime.game_slug = 'ide_project'
-            runtime._ide_mode = True
-            js_log(f"[main.py] IDE game loaded: {runtime.game.NAME}")
+            try:
+                game_class = GameEngine.from_yaml(game_json_path)
+                runtime.game = game_class(
+                    content_fs=content_fs,
+                    width=runtime.width,
+                    height=runtime.height
+                )
+                runtime.game_slug = 'ide_project'
+                runtime._ide_mode = True
+                js_log(f"[main.py] IDE game loaded: {runtime.game.NAME}")
 
-            # Notify IDE
-            browser_platform.window.ideBridge.notifyReloaded()
+                # Notify IDE
+                browser_platform.window.ideBridge.notifyReloaded()
+            except Exception as e:
+                js_log(f"[main.py] ERROR loading game: {e}")
+                import traceback
+                traceback.print_exc()
+                browser_platform.window.ideBridge.notifyError(str(e), None, None)
         else:
             js_log(f"[main.py] ERROR: No game.json at {game_json_path}")
             return

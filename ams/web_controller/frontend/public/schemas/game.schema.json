@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://ams.games/schemas/game.schema.json",
+  "$id": "https://yamplay.cc/schemas/game.schema.json",
   "title": "AMS Game Definition",
   "description": "Schema for AMS game.yaml files - data-driven arcade game definitions",
   "type": "object",

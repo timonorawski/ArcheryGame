@@ -11,6 +11,8 @@ import json
 import sys
 from typing import Callable, Optional, Any
 
+from ams.yaml import loads as yaml_loads, YAMLNotAvailableError
+
 # Conditional import for browser environment
 if sys.platform == "emscripten":
     import platform as browser_platform
@@ -89,8 +91,7 @@ class LevelBridge:
         game_type = data.get('game', 'containment')
 
         try:
-            import yaml
-            level_data = yaml.safe_load(yaml_content)
+            level_data = yaml_loads(yaml_content, format='yaml')
 
             if not level_data:
                 self.send_validation_result(False, "Empty YAML content")
@@ -104,8 +105,8 @@ class LevelBridge:
             else:
                 self.send_validation_result(True, "Valid level configuration")
 
-        except yaml.YAMLError as e:
-            self.send_validation_result(False, f"YAML syntax error: {e}")
+        except YAMLNotAvailableError:
+            self.send_validation_result(False, "YAML validation not available in browser. Use JSON format.")
         except Exception as e:
             self.send_validation_result(False, f"Validation error: {e}")
 
@@ -321,8 +322,7 @@ class LevelAuthoringSession:
             return
 
         try:
-            import yaml
-            level_data = yaml.safe_load(yaml_content)
+            level_data = yaml_loads(yaml_content, format='yaml')
 
             if not level_data:
                 self.bridge.send_level_error("Empty YAML")
@@ -344,8 +344,8 @@ class LevelAuthoringSession:
             else:
                 self.bridge.send_level_error("Game does not support level loading")
 
-        except yaml.YAMLError as e:
-            self.bridge.send_level_error(f"YAML syntax error: {e}")
+        except YAMLNotAvailableError:
+            self.bridge.send_level_error("YAML loading not available in browser. Use JSON format.")
         except Exception as e:
             self.bridge.send_level_error(f"Failed to apply level: {e}")
 

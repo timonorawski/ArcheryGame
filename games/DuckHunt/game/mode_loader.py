@@ -16,10 +16,10 @@ Examples:
 
 from pathlib import Path
 from typing import List, Optional
-import yaml
 from pydantic import ValidationError
 
 from models.duckhunt import GameModeConfig
+from ams.yaml import loads as load_yaml_string
 
 
 class GameModeLoader:
@@ -90,13 +90,7 @@ class GameModeLoader:
             )
 
         # Load YAML file
-        try:
-            with open(yaml_path, 'r') as f:
-                config_dict = yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            raise yaml.YAMLError(
-                f"Failed to parse YAML file '{yaml_path}': {e}"
-            )
+        config_dict = load_yaml_string(yaml_path)
 
         # Validate with Pydantic
         try:

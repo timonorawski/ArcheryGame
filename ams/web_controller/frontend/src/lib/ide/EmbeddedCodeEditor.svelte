@@ -23,6 +23,19 @@
   }
 
   async function initEditor() {
+    // Configure MonacoEnvironment for worker loading before importing Monaco
+    if (!self.MonacoEnvironment) {
+      self.MonacoEnvironment = {
+        getWorker: function (workerId, label) {
+          // Default editor worker for Lua (no special worker)
+          return new Worker(
+            new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url),
+            { type: 'module' }
+          );
+        }
+      };
+    }
+
     monaco = await import('monaco-editor');
 
     editor = monaco.editor.create(container, {

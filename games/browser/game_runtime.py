@@ -362,8 +362,8 @@ class BrowserGameRuntime:
             return
 
         try:
-            import yaml
-            level_data = yaml.safe_load(yaml_content)
+            from ams.yaml import load as load_yaml_file
+            level_data = load_yaml_file(yaml_content)
 
             if not level_data:
                 self._send_to_js('level_error', {'error': 'Empty YAML'})

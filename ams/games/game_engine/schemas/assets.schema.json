@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://ams.games/schemas/assets.schema.json",
+  "$id": "https://yamplay.cc/schemas/assets.schema.json",
   "title": "AMS Asset Definitions",
   "description": "Schema for standalone asset definition files (sprites, sounds, images)",
 

@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://yamplay.cc/schemas/interactions.schema.json",
+  "title": "AMS Interactions Schema",
+  "description": "Shared schema definitions for the unified interactions system",
+
+  "$defs": {
+    "interactions_block": {
+      "type": "object",
+      "description": "Interactions grouped by trigger source",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/interaction_list",
+          "description": "Lifecycle triggers (enter, exit, continuous)"
+        },
+        "other": {
+          "$ref": "#/$defs/interaction_list",
+          "description": "Collision triggers with other entities"
+        },
+        "pointer": {
+          "$ref": "#/$defs/interaction_list",
+          "description": "User input (click/hit) triggers"
+        },
+        "screen": {
+          "$ref": "#/$defs/interaction_list",
+          "description": "Screen boundary triggers"
+        }
+      }
+    },
+
+    "interaction_list": {
+      "oneOf": [
+        { "$ref": "#/$defs/interaction" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/interaction" }
+        }
+      ]
+    },
+
+    "interaction": {
+      "type": "object",
+      "description": "A single interaction definition",
+      "required": ["action"],
+      "additionalProperties": false,
+      "properties": {
+        "when": {
+          "$ref": "#/$defs/filter_conditions",
+          "description": "Conditions that must be true for this interaction to fire"
+        },
+        "because": {
+          "type": "string",
+          "enum": ["enter", "exit", "continuous"],
+          "description": "Trigger mode: enter (once when true), exit (once when false), continuous (every frame)"
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to execute (e.g., bounce, destroy, spawn, transform)"
+        },
+        "modifier": {
+          "type": "object",
+          "description": "Parameters passed to the action",
+          "additionalProperties": true
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["top", "bottom", "left", "right"]
+          },
+          "description": "Screen edges shorthand (for screen triggers)"
+        }
+      }
+    },
+
+    "filter_conditions": {
+      "type": "object",
+      "description": "Filter conditions for interaction",
+      "additionalProperties": true,
+      "properties": {
+        "distance": {
+          "$ref": "#/$defs/numeric_filter",
+          "description": "Distance filter (0 = collision)"
+        },
+        "angle": {
+          "$ref": "#/$defs/numeric_filter",
+          "description": "Angle filter (direction from A to B, degrees)"
+        }
+      },
+      "patternProperties": {
+        "^a\\.": {
+          "description": "Filter on entity A (self) attribute"
+        },
+        "^b\\.": {
+          "description": "Filter on entity B (other) attribute"
+        }
+      }
+    },
+
+    "numeric_filter": {
+      "oneOf": [
+        { "type": "number" },
+        {
+          "type": "object",
+          "properties": {
+            "lt": { "type": "number", "description": "Less than" },
+            "gt": { "type": "number", "description": "Greater than" },
+            "lte": { "type": "number", "description": "Less than or equal" },
+            "gte": { "type": "number", "description": "Greater than or equal" },
+            "between": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "Between [min, max] inclusive"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

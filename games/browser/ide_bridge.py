@@ -90,14 +90,20 @@ def setup_ide_logging():
     _ide_log_handler = IDELogHandler()
     _ide_log_handler.setLevel(logging.DEBUG)
 
-    # Add handler to relevant loggers
+    # Add handler to relevant loggers and ensure their levels allow messages through
     for logger_name in ['ams', 'games', 'browser']:
         logger = logging.getLogger(logger_name)
         logger.addHandler(_ide_log_handler)
+        # Set logger level to DEBUG so messages reach the handler
+        # (without this, logger defaults to NOTSET which defers to root's WARNING level)
+        logger.setLevel(logging.DEBUG)
 
     # Also add to root logger to catch everything
     root_logger = logging.getLogger()
     root_logger.addHandler(_ide_log_handler)
+    # Set root level to INFO to avoid flooding with DEBUG from all libraries
+    if root_logger.level == logging.NOTSET or root_logger.level > logging.INFO:
+        root_logger.setLevel(logging.INFO)
 
     print("[IDEBridge] Log forwarding to IDE enabled")
 

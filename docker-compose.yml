@@ -37,6 +37,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - BUILD_DIR=/build/web
+      - FORCE_REBUILD=1
       # Set FORCE_REBUILD=1 to force rebuild pygbag
     networks:
       - yams-dev

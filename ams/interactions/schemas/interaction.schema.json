@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://ams.games/schemas/interaction.schema.json",
+  "$id": "https://yamplay.cc/schemas/interaction.schema.json",
   "title": "AMS Interaction Definition",
   "description": "Schema for entity interactions in the unified interaction system",
 

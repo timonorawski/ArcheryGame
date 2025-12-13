@@ -12,7 +12,6 @@ The InteractionEngine:
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, Set
-import yaml
 
 from .parser import Interaction, parse_interactions, TriggerMode, Filter
 from .filter import FilterEvaluator, InteractionContext, evaluate_filter
@@ -20,6 +19,7 @@ from .trigger import TriggerManager, TriggerEvent, LifecycleManager, LifecycleEv
 from .system_entities import SystemEntities, InputType
 
 from ams import profiling
+from ams.yaml import load as load_yaml_file
 from ams.logging import get_logger
 
 @dataclass
@@ -58,9 +58,7 @@ class MonotonicRegistry:
 
         if not path.exists():
             return registry
-
-        with open(path) as f:
-            data = yaml.safe_load(f)
+        data = load_yaml_file(path)
 
         for entity_name, config in data.items():
             if not isinstance(config, dict):

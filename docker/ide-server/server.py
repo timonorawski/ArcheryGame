@@ -50,9 +50,84 @@ class ProjectCreate(BaseModel):
 # Schema API
 # ============================================================================
 
+def _rewrite_schema_refs(schema: dict, base_url: str, schema_path: str) -> dict:
+    """Recursively rewrite $id and $ref fields to use absolute URLs.
+
+    Args:
+        schema: Schema dict to rewrite
+        base_url: Base URL for schemas (e.g., http://localhost:8000/api/schemas)
+        schema_path: Current schema path within schemas dir (e.g., game.schema.json)
+
+    Returns:
+        Schema with rewritten URLs
+    """
+    import copy
+    from urllib.parse import urljoin
+    from posixpath import normpath
+
+    schema = copy.deepcopy(schema)
+
+    # Calculate the directory of the current schema for relative path resolution
+    schema_dir = str(Path(schema_path).parent)
+    if schema_dir == '.':
+        schema_dir = ''
+
+    def rewrite_value(value, key):
+        if not isinstance(value, str):
+            return value
+
+        if key == '$id':
+            # Rewrite $id to use our base URL
+            # e.g., https://yamplay.cc/schemas/game.schema.json -> http://localhost:8000/api/schemas/game.schema.json
+            if 'yamplay.cc/schemas/' in value:
+                # Extract the schema filename from the original $id
+                schema_file = value.split('yamplay.cc/schemas/')[-1]
+                return f"{base_url}/{schema_file}"
+            return value
+
+        if key == '$ref':
+            # Skip internal refs (same-document)
+            if value.startswith('#'):
+                return value
+
+            # Handle fragment separately
+            ref_path = value
+            fragment = ''
+            if '#' in value:
+                ref_path, fragment = value.split('#', 1)
+                fragment = '#' + fragment
+
+            # Resolve relative path (e.g., ../lua/foo.json -> lua/foo.json)
+            if schema_dir:
+                resolved = normpath(f"{schema_dir}/{ref_path}")
+            else:
+                resolved = normpath(ref_path)
+
+            # Remove leading ../ that might escape (shouldn't happen with proper schemas)
+            while resolved.startswith('../'):
+                resolved = resolved[3:]
+
+            return f"{base_url}/{resolved}{fragment}"
+
+        return value
+
+    def rewrite_recursive(obj):
+        if isinstance(obj, dict):
+            return {k: rewrite_value(rewrite_recursive(v), k) if k in ('$id', '$ref') else rewrite_recursive(v)
+                    for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [rewrite_recursive(item) for item in obj]
+        return obj
+
+    return rewrite_recursive(schema)
+
+
 @app.get("/api/schemas/{schema_name:path}")
-async def get_schema(schema_name: str):
+async def get_schema(request: Request, schema_name: str):
     """Serve JSON schemas for Monaco validation.
+
+    Rewrites $id and $ref to use absolute URLs based on the request origin,
+    enabling proper schema resolution in monaco-yaml.
 
     Supports fragment references like 'assets.schema.json#sprite' which returns
     the subschema at $defs/sprite wrapped as a standalone schema.
@@ -68,6 +143,15 @@ async def get_schema(schema_name: str):
         raise HTTPException(status_code=404, detail=f"Schema not found: {schema_name}")
 
     schema = json.loads(schema_path.read_text())
+
+    # Build base URL from request
+    # Use X-Forwarded headers if behind proxy (nginx), otherwise use request URL
+    forwarded_proto = request.headers.get('x-forwarded-proto', request.url.scheme)
+    forwarded_host = request.headers.get('x-forwarded-host', request.url.netloc)
+    base_url = f"{forwarded_proto}://{forwarded_host}/api/schemas"
+
+    # Rewrite $id and $ref to absolute URLs
+    schema = _rewrite_schema_refs(schema, base_url, schema_name)
 
     # If fragment specified, extract the subschema
     if fragment:

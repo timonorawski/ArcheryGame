@@ -909,7 +909,7 @@ ams/web_controller/frontend/src/lib/debug/
 3. **Shareable Link**
    - Small games: URL-encoded data
    - Large games: Server-stored with ID
-   - Example: `https://ams.games/play?id=abc123`
+   - Example: `https://yamplay.cc/play?id=abc123`
 
 ### Gallery/Showcase
 

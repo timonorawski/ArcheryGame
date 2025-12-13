@@ -1,0 +1,224 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://yamplay.cc/schemas/entity.schema.json",
+  "title": "AMS Entity Schema",
+  "description": "Schema definitions for entity types - extracted from game.schema.json for reuse",
+
+  "$defs": {
+    "entity_type": {
+      "type": "object",
+      "description": "Entity type definition",
+      "properties": {
+        "extends": {
+          "type": "string",
+          "description": "Base entity type to inherit from",
+          "x-content-type": "@ref:entity_type"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1,
+          "description": "Entity width in pixels"
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1,
+          "description": "Entity height in pixels"
+        },
+        "color": {
+          "$ref": "game.schema.json#/$defs/color_ref",
+          "description": "Entity color"
+        },
+        "sprite": {
+          "type": "string",
+          "description": "Sprite name from assets.sprites",
+          "x-content-type": "@ref:sprite"
+        },
+        "behaviors": {
+          "type": "array",
+          "items": {
+            "$ref": "game.schema.json#/$defs/behavior_ref"
+          },
+          "description": "List of behaviors attached to this entity"
+        },
+        "behavior_config": {
+          "type": "object",
+          "description": "Configuration for behaviors",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "interactions": {
+          "$ref": "interactions.schema.json#/$defs/interactions_block",
+          "description": "Unified interactions (collisions, input, screen bounds, lifecycle)"
+        },
+        "properties": {
+          "type": "object",
+          "description": "Custom properties for this entity type",
+          "additionalProperties": true
+        },
+        "health": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Entity health points"
+        },
+        "points": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Points awarded when destroyed"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tags for categorization (player, enemy, brick, etc.)"
+        },
+        "render_as": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "x-content-type": "@ref:entity_type"
+          },
+          "description": "Composite rendering from other entity types"
+        },
+        "render": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/render_command"
+          },
+          "description": "Render commands for this entity"
+        },
+        "on_destroy": {
+          "$ref": "game.schema.json#/$defs/transform_config",
+          "description": "Transform to apply when entity is destroyed"
+        },
+        "on_update": {
+          "type": "array",
+          "items": {
+            "$ref": "game.schema.json#/$defs/on_update_transform"
+          },
+          "description": "Conditional transforms during update"
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "render_command": {
+      "type": "object",
+      "description": "A single render primitive",
+      "required": ["shape"],
+      "properties": {
+        "shape": {
+          "type": "string",
+          "enum": ["rectangle", "circle", "triangle", "polygon", "line", "sprite", "text"],
+          "description": "Shape type to render"
+        },
+        "color": {
+          "$ref": "game.schema.json#/$defs/color_ref",
+          "description": "Shape color or $property reference"
+        },
+        "fill": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to fill the shape"
+        },
+        "line_width": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Line width for outlines"
+        },
+        "alpha": {
+          "oneOf": [
+            { "type": "number", "minimum": 0, "maximum": 255 },
+            { "type": "string", "pattern": "^\\$.+$" },
+            { "$ref": "game.schema.json#/$defs/lua_expression" }
+          ],
+          "description": "Alpha transparency (0-255, $property, or {lua: expr})"
+        },
+        "offset": {
+          "$ref": "game.schema.json#/$defs/point_2d",
+          "description": "Offset from entity position"
+        },
+        "size": {
+          "$ref": "game.schema.json#/$defs/point_2d",
+          "description": "Override entity size [width, height]"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "$ref": "game.schema.json#/$defs/point_2d"
+          },
+          "description": "Points for polygon/triangle/line (normalized 0-1)"
+        },
+        "radius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Circle radius (normalized to entity size)"
+        },
+        "sprite_name": {
+          "type": "string",
+          "description": "Sprite name for sprite shape",
+          "x-content-type": "@ref:sprite"
+        },
+        "sprite": {
+          "type": "string",
+          "description": "Sprite name (alias for sprite_name)",
+          "x-content-type": "@ref:sprite"
+        },
+        "text": {
+          "type": "string",
+          "description": "Text content or $property reference"
+        },
+        "font_size": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "Font size in pixels"
+        },
+        "align": {
+          "type": "string",
+          "enum": ["center", "left", "right"],
+          "default": "center",
+          "description": "Text alignment"
+        },
+        "when": {
+          "$ref": "#/$defs/render_when",
+          "description": "Condition for rendering"
+        },
+        "stop": {
+          "type": "boolean",
+          "default": false,
+          "description": "Stop processing further render commands"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "render_when": {
+      "type": "object",
+      "description": "Condition for conditional rendering",
+      "required": ["property"],
+      "properties": {
+        "property": {
+          "type": "string",
+          "description": "Property name to check"
+        },
+        "value": {
+          "description": "Expected value"
+        },
+        "compare": {
+          "type": "string",
+          "enum": ["equals", "not_equals", "greater_than", "less_than", "between"],
+          "default": "equals",
+          "description": "Comparison operator"
+        },
+        "min": {
+          "type": "number",
+          "description": "Minimum value for 'between' comparison"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

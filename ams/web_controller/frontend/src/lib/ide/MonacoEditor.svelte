@@ -17,16 +17,65 @@
   let yamlWorker = null;
 
   onMount(async () => {
+    // Configure MonacoEnvironment for worker loading before importing Monaco
+    // This is required for monaco-yaml and other plugins that use web workers
+    if (!self.MonacoEnvironment) {
+      self.MonacoEnvironment = {
+        getWorker: function (workerId, label) {
+          // Use dynamic imports for workers - Vite will handle bundling
+          if (label === 'yaml') {
+            return new Worker(
+              new URL('monaco-yaml/yaml.worker.js', import.meta.url),
+              { type: 'module' }
+            );
+          }
+          if (label === 'json') {
+            return new Worker(
+              new URL('monaco-editor/esm/vs/language/json/json.worker.js', import.meta.url),
+              { type: 'module' }
+            );
+          }
+          if (label === 'css' || label === 'scss' || label === 'less') {
+            return new Worker(
+              new URL('monaco-editor/esm/vs/language/css/css.worker.js', import.meta.url),
+              { type: 'module' }
+            );
+          }
+          if (label === 'html' || label === 'handlebars' || label === 'razor') {
+            return new Worker(
+              new URL('monaco-editor/esm/vs/language/html/html.worker.js', import.meta.url),
+              { type: 'module' }
+            );
+          }
+          if (label === 'typescript' || label === 'javascript') {
+            return new Worker(
+              new URL('monaco-editor/esm/vs/language/typescript/ts.worker.js', import.meta.url),
+              { type: 'module' }
+            );
+          }
+          // Default editor worker
+          return new Worker(
+            new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url),
+            { type: 'module' }
+          );
+        }
+      };
+    }
+
     // Dynamically import Monaco
     monaco = await import('monaco-editor');
 
     // Configure YAML with schema validation from filetypes registry
     if (language === 'yaml') {
+      // Get base URL for schema resolution (needed for $ref in schemas)
+      const baseUrl = window.location.origin;
+
       // Build schema config from filetypes
       const schemas = filetypes
         .filter(ft => ft.schema && ft.fileMatch)
         .map(ft => ({
-          uri: ft.schema,
+          // Make schema URIs absolute for proper $ref resolution
+          uri: ft.schema.startsWith('http') ? ft.schema : `${baseUrl}${ft.schema}`,
           fileMatch: ft.fileMatch
         }));
 
@@ -37,10 +86,10 @@
         validate: true,
         format: true,
         schemas: schemas.length > 0 ? schemas : [
-          // Fallback if filetypes not loaded yet
-          { uri: '/api/schemas/game.schema.json', fileMatch: ['**/game.yaml'] },
-          { uri: '/api/schemas/level.schema.json', fileMatch: ['**/levels/*.yaml'] },
-          { uri: '/api/schemas/lua_script.schema.json', fileMatch: ['**/*.lua.yaml'] }
+          // Fallback if filetypes not loaded yet - use absolute URLs
+          { uri: `${baseUrl}/api/schemas/game.schema.json`, fileMatch: ['**/game.yaml'] },
+          { uri: `${baseUrl}/api/schemas/level.schema.json`, fileMatch: ['**/levels/*.yaml'] },
+          { uri: `${baseUrl}/api/schemas/lua_script.schema.json`, fileMatch: ['**/*.lua.yaml'] }
         ]
       });
     }

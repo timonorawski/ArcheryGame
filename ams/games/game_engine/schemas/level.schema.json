@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://ams.games/schemas/level.schema.json",
+  "$id": "https://yamplay.cc/schemas/level.schema.json",
   "title": "AMS Level Definition",
   "description": "Schema for AMS level YAML files",
   "type": "object",
