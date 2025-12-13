@@ -1,4 +1,4 @@
-description: Ball exited bottom of screen - lose a life and reset paddle
+description: Ball exited bottom of screen - destroy ball and reset paddle
 lua: |
   local action = {}
 
@@ -7,10 +7,8 @@ lua: |
     -- Destroy the ball
     ams.destroy(ball_id)
 
-    -- Lose a life
-    ams.lose_life()
-
-    -- Find paddle and transform back to paddle_ready state
+    -- Transform paddle back to paddle_ready state
+    -- The paddle_ready entity handles the life loss via its own interaction
     local paddles = ams.get_entities_by_type("paddle")
     for _, paddle_id in ipairs(paddles) do
       ams.transform(paddle_id, "paddle_ready")

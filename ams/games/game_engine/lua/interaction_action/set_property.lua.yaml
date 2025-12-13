@@ -1,0 +1,14 @@
+description: Set a property on entity A
+lua: |
+  local action = {}
+
+  function action.execute(entity_id, target_id, modifier, context)
+    -- context contains: trigger, target, target_x, target_y, target_active, distance, angle
+    -- modifier.property: property name to set
+    -- modifier.value: value to set
+    if modifier and modifier.property then
+      ams.set_prop(entity_id, modifier.property, modifier.value)
+    end
+  end
+
+  return action

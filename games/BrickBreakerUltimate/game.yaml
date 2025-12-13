@@ -87,7 +87,23 @@ entity_types:
         offset: [52, -20]  # center of paddle width (120/2 - 8), above
         size: [16, 16]
 
+    properties:
+      has_played: false
+
     interactions:
+      # On spawn/transform into paddle_ready, lose life if not first spawn
+      level:
+        - because: enter
+          when:
+            a.has_played: true
+          action: lose_life
+        # Mark that we've played (always runs on enter)
+        - because: enter
+          action: set_property
+          modifier:
+            property: has_played
+            value: true
+
       pointer:
         # On click, set target AND launch
         - when:

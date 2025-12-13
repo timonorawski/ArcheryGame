@@ -1,0 +1,10 @@
+description: Lose a life
+lua: |
+  local action = {}
+
+  function action.execute(entity_id, target_id, modifier, context)
+    -- context contains: trigger, target, target_x, target_y, target_active, distance, angle
+    ams.lose_life()
+  end
+
+  return action
