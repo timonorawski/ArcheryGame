@@ -9,14 +9,21 @@ Enable non-developers to create, edit, and share YAML-defined games directly in 
 | Phase | Status | Description |
 |-------|--------|-------------|
 | **Phase 0: Browser Engine** | ✅ Complete | Fengari Lua + pygbag - games running in browser |
-| **Phase 1: MVP Editor** | 🚧 In Progress | Monaco editor + Docker backend + file persistence |
+| **Phase 1: MVP Editor** | ✅ Complete | Monaco editor + Docker backend + hot reload working |
+| Phase 1.1: Log Streaming | 🚧 Next | Live tail panel for engine logs (testing aid) |
+| Phase 1.5: Asset & Content-Type | Not Started | Asset browser, content-type aware field editors |
 | Phase 2: Visual Editors | Not Started | Sprite sheet + level layout editors |
 | Phase 3: Debugger | Not Started | Breakpoints, stepping, inspection |
 | Phase 4: Sharing | Not Started | Export, shareable links, gallery |
 
 **Prerequisite:** BROWSER_DEPLOYMENT.md Phase 1-3 (Complete) ✅
 
-> **Note:** Phase 0 complete. Phase 1 foundation implemented: Svelte frontend with Monaco, Docker backend with file API, project persistence to host filesystem.
+> **Phase 1 Complete!** Full IDE-to-engine workflow operational:
+> - Monaco editor with YAML syntax and project file tree
+> - Docker backend with file API and host volume persistence
+> - IDE bridge (postMessage) for file transfer to engine
+> - **Hot reload**: Edit files → engine auto-reloads game in real-time
+> - WASM compatibility fixes (threading, JS/Python boundary)
 
 ---
 
@@ -159,7 +166,7 @@ Python (pygbag WASM)              JavaScript
 
 ---
 
-## Phase 1: MVP Editor 🚧
+## Phase 1: MVP Editor ✅ COMPLETE
 
 **Goal:** Edit game.yaml in Monaco, see changes in pygbag preview.
 
@@ -272,9 +279,9 @@ The preview uses a **static pre-built pygbag engine** rather than rebuilding on 
 | `games/browser/game_runtime.py` | IDE bridge integration in game loop |
 | `src/lib/ide/PreviewFrame.svelte` | Sends files via postMessage |
 
-### Remaining Work
+### Completed Work
 
-1. **IDE ↔ Engine Bridge** ✅ IMPLEMENTED
+1. **IDE ↔ Engine Bridge** ✅
    - [x] `ide_bridge.js` - receive postMessage, queue for Python
    - [x] `ide_bridge.py` - write to ContentFS, trigger reload
    - [x] `ContentFSBrowser` - added write support
@@ -282,22 +289,36 @@ The preview uses a **static pre-built pygbag engine** rather than rebuilding on 
    - [x] Update `PreviewFrame.svelte` to send files
    - [x] Add `js-yaml` to package.json for YAML→JSON conversion
 
-2. **Monaco Schema Validation**
+2. **Frontend ↔ Backend Integration** ✅
+   - [x] Connect FileTree to `/api/projects` endpoints
+   - [x] Connect MonacoEditor save to `/api/projects/{name}/files/{path}`
+   - [x] Load/save project state
+   - [x] Auto-save with 2-second debounce
+
+3. **Preview Integration** ✅
+   - [x] Embed pygbag build in iframe
+   - [x] IDE mode startup (wait for files before loading game)
+   - [x] Hot reload on file changes (reactive file watching)
+   - [x] Engine signals ready → IDE sends files → engine reloads
+
+4. **WASM Compatibility Fixes** ✅
+   - [x] Make `ams/profiling.py` WASM-safe (conditional threading)
+   - [x] Fix JS/Python boundary (JSON serialization at boundary)
+   - [x] Add `_frame_count` initialization for profiling
+
+5. **UI** ✅
+   - [x] Tailwind CSS + DaisyUI components
+   - [x] Dark theme
+
+### Future Enhancements (Phase 1.5+)
+
+1. **Monaco Schema Validation**
    - [ ] Wire up JSON schemas to Monaco YAML validation
    - [ ] Handle `$ref` resolution between schemas
 
-3. **Frontend ↔ Backend Integration**
-   - [ ] Connect FileTree to `/api/projects` endpoints
-   - [ ] Connect MonacoEditor save to `/api/projects/{name}/files/{path}`
-   - [ ] Load/save project state
-
-4. **Preview Integration**
-   - [x] Embed pygbag build in iframe
+2. **Error Display**
    - [ ] Display runtime Lua errors in IDE
-   - [ ] Switch to static engine URL (yamplay.cc or local)
-
-5. **UI Upgrade** (planned)
-   - [ ] Migrate to Tailwind CSS + DaisyUI
+   - [ ] Show validation errors inline in editor
 
 ### File Structure (Implemented)
 
@@ -365,19 +386,321 @@ docker compose up --build
 # nginx proxies /archives/* to pygame-web.github.io
 ```
 
-### Success Criteria
+### Success Criteria ✅ ALL MET
 
 - [x] IDE entry point at `/author`
 - [x] Split-pane layout with resizable divider
 - [x] Monaco editor with YAML syntax highlighting
-- [x] File tree sidebar (basic structure)
+- [x] File tree sidebar with API integration
 - [x] Schema API endpoint serving all schemas
 - [x] Projects API with CRUD operations
 - [x] Files persist to host via Docker volume
 - [x] Preview iframe loads pygbag games (Docker auto-builds on startup)
-- [ ] Edit `game.yaml`, see changes in preview (hot reload)
-- [ ] Schema validation shows errors inline
-- [ ] Runtime Lua errors display in IDE
+- [x] Edit `game.yaml` → see changes in preview (hot reload)
+- [x] **Auto-reload on file change** (no manual Run button needed)
+- [x] Engine ready signal hides loading overlay
+- [x] WASM compatibility (threading, JS/Python boundary)
+
+---
+
+## Phase 1.1: Log Streaming (Testing Aid)
+
+**Goal:** Live tail panel showing engine logs for debugging hot reload and game behavior.
+
+### Architecture
+
+```
+Engine (Python)                              IDE (Svelte)
+┌─────────────────────┐                      ┌─────────────────────┐
+│ IDELogHandler       │    postMessage       │ LogPanel.svelte     │
+│ (logging.Handler)   │───────────────────►  │ - auto-truncate     │
+│                     │    {type: 'log',     │ - level filtering   │
+│ Captures ams.*      │     level, message}  │ - pause/resume      │
+│ logger output       │                      │ - search            │
+└─────────────────────┘                      └─────────────────────┘
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Auto-Truncation** | Keep only last N lines (default: 200) to prevent memory bloat |
+| Level Filtering | Show/hide DEBUG, INFO, WARNING, ERROR |
+| Pause/Resume | Stop scrolling to inspect, resume to catch up |
+| Search | Filter logs by regex or text |
+| Clear | Manual clear button |
+| Timestamps | Optional timestamp prefix |
+
+### Auto-Truncation
+
+Engine logs are noisy - the panel auto-truncates by default:
+
+```javascript
+// LogPanel.svelte
+const MAX_LINES = 200;  // Configurable
+
+function addLog(entry) {
+  logs = [...logs, entry];
+  if (logs.length > MAX_LINES) {
+    logs = logs.slice(-MAX_LINES);  // Keep most recent
+  }
+}
+```
+
+User can:
+- Adjust max lines (50, 100, 200, 500, unlimited)
+- See "X lines truncated" indicator
+- Scroll lock pauses truncation temporarily
+
+### postMessage Protocol
+
+```javascript
+// Engine → IDE
+{type: 'log', level: 'info', message: 'Loading entity_types...', timestamp: 1234567890}
+{type: 'log', level: 'error', message: 'Failed to load sprite: player', timestamp: 1234567891}
+{type: 'log', level: 'debug', message: 'Entity spawned: duck_123', timestamp: 1234567892}
+```
+
+### Files to Create/Modify
+
+| File | Change |
+|------|--------|
+| `src/lib/ide/LogPanel.svelte` | **NEW** - Log viewer with auto-truncation |
+| `src/Author.svelte` | Add LogPanel below preview or as collapsible panel |
+| `games/browser/ide_bridge.py` | Add `IDELogHandler` to forward logs |
+| `games/browser/ide_bridge.js` | Forward log messages to parent window |
+
+### Success Criteria
+
+- [ ] Engine logs appear in IDE within 100ms
+- [ ] Panel auto-truncates at 200 lines by default
+- [ ] Can filter by log level (hide DEBUG)
+- [ ] Can pause to inspect, resume to catch up
+- [ ] "X lines truncated" indicator shows when trimmed
+
+> **Full implementation details:** See `docs/planning/web_ide/VISUAL_IDE.md` Section 12
+
+---
+
+## Phase 1.5: Asset Registry & Content-Type Editors
+
+**Goal:** Leverage discovered asset definitions for intelligent editing.
+
+### Asset Registry Integration
+
+The `AssetRegistry` class discovers asset definitions from `assets/*.json` files (converted from YAML at build time). This enables rich IDE features:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Engine loads                                                    │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ AssetRegistry.discover('assets/')                           ││
+│  │   → finds sprites.json, shot.json, etc.                     ││
+│  │   → registers sprites/sounds by name                        ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                              │                                   │
+│                              ▼                                   │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ IDE receives asset manifest via postMessage                 ││
+│  │   → populates asset browser panel                           ││
+│  │   → enables autocomplete for sprite:/sound: fields          ││
+│  │   → shows previews and provenance                           ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Features:**
+
+| Feature | Description |
+|---------|-------------|
+| Asset Browser Panel | Sidebar showing all discovered sprites/sounds with thumbnails |
+| Autocomplete | Type `sprite: p` → suggests `player`, `projectile`, etc. |
+| Inline Preview | Hover over `sprite: duck_flying` → see sprite thumbnail |
+| Provenance Display | Show author, license, source for assets with metadata |
+| Asset Search | Filter assets by name, tags, type |
+| Drag-and-Drop | Drag asset from browser into YAML → inserts reference |
+
+**postMessage Protocol (new):**
+
+```javascript
+// Engine → IDE (on load)
+{type: 'asset_manifest', sprites: {...}, sounds: {...}}
+
+// IDE → Engine (query)
+{type: 'get_asset_preview', name: 'duck_flying', type: 'sprite'}
+
+// Engine → IDE (response)
+{type: 'asset_preview', name: 'duck_flying', dataUrl: 'data:image/png;base64,...'}
+```
+
+### Content-Type Aware Editors
+
+When the cursor is on a typed field in YAML, offer specialized editors based on the field's JSON Schema `x-content-type`:
+
+```yaml
+# game.yaml with content-type annotations (from schema)
+entity_types:
+  duck:
+    sprite: duck_flying      # x-content-type: "sprite" → sprite picker
+    sound: quack             # x-content-type: "sound" → sound picker
+    color: [255, 200, 0]     # x-content-type: "color" → color picker
+    transparent: [159, 227, 163]  # x-content-type: "color"
+
+background:
+  color: "#1a1a2e"           # x-content-type: "color" → color picker
+  image: backgrounds/sky.png # x-content-type: "file" → file browser
+
+levels:
+  - level: level1            # x-content-type: "level" → level editor
+```
+
+**Content-Type Editor Mapping:**
+
+| x-content-type | Editor Widget | Behavior |
+|----------------|---------------|----------|
+| `sprite` | SpritePicker | Grid of available sprites with preview |
+| `sound` | SoundPicker | List with play button for each sound |
+| `color` | ColorPicker | RGB/hex picker with transparency support |
+| `file` | FileBrowser | Asset file browser with upload support |
+| `level` | LevelLink | Click to jump to level editor view |
+| `lua` | LuaEditor | Monaco with Lua syntax, `ams.*` completions, error markers |
+| `yaml` | YamlEditor | Monaco with YAML syntax, schema validation, $ref support |
+| `behavior` | BehaviorPicker | List behaviors with config schema preview |
+| `entity_type` | EntityPicker | List entity types with sprite preview |
+
+### Code Field Editors (Lua & YAML)
+
+For `x-content-type: lua` and `x-content-type: yaml` fields, the IDE opens a dedicated code editor panel rather than inline editing. This provides:
+
+**Lua Editor (`x-content-type: lua`):**
+```yaml
+# In game.yaml - inline Lua behavior
+behaviors:
+  custom_bounce:
+    lua: |                    # ← x-content-type: lua
+      function on_update(entity, dt)
+        if ams.get_y(entity) > 500 then
+          ams.set_vy(entity, -ams.get_vy(entity) * 0.8)
+        end
+      end
+```
+
+Features:
+- Full Monaco editor with Lua syntax highlighting
+- `ams.*` API autocomplete (get_x, set_vy, spawn, destroy, etc.)
+- Function signature hints from Lua API documentation
+- Syntax error highlighting
+- Expand to full-screen editor mode
+- **Sandbox violation warnings** - flags use of blocked globals
+
+**Sandbox-Aware Linting:**
+
+The Lua sandbox removes dangerous functions for security. The IDE warns immediately:
+
+```lua
+function on_update(entity, dt)
+  local f = io.open("secrets.txt")  -- ⚠️ Warning: 'io' is not available (sandboxed)
+  os.execute("rm -rf /")            -- ⚠️ Warning: 'os' is not available (sandboxed)
+  require("socket")                 -- ⚠️ Warning: 'require' is not available (sandboxed)
+  debug.getinfo(1)                  -- ⚠️ Warning: 'debug' is not available (sandboxed)
+end
+```
+
+Blocked globals (from `LUA_SECURITY.md`):
+- `io`, `os`, `debug`, `package` - removed entirely
+- `require`, `loadfile`, `dofile`, `load` - no dynamic code loading
+- `rawget`, `rawset`, `getmetatable`, `setmetatable` - no metatable access
+- `string.dump` - no bytecode access
+- `string.rep` - limited to prevent memory bombs
+
+**YAML Editor (`x-content-type: yaml`):**
+```yaml
+# In game.yaml - embedded level definition
+levels:
+  - level: level1
+    inline: |                 # ← x-content-type: yaml
+      entities:
+        - type: brick
+          grid: { cols: 10, rows: 3 }
+```
+
+Features:
+- Monaco with YAML syntax + schema validation
+- Autocomplete from referenced schema (level.schema.json)
+- Inline error markers for schema violations
+- Expand to full-screen editor mode
+
+**UI Interaction:**
+
+```
++------------------------------------------------------------------+
+|  Monaco Editor                                                     |
+|------------------------------------------------------------------|
+|  entity_types:                                                    |
+|    duck:                                                          |
+|      sprite: duck_flying  ← cursor here                           |
+|              └─────────────────────────────────────────────┐      |
+|                                                            │      |
+|  +--------------------------------------------------+      │      |
+|  │ SPRITE PICKER                           [×]      │◄─────┘      |
+|  │ ┌────────┐ ┌────────┐ ┌────────┐               │              |
+|  │ │[sprite]│ │[sprite]│ │[sprite]│               │              |
+|  │ │  duck  │ │ duck_l │ │ duck_r │ ← click to    │              |
+|  │ │ flying │ │ flying │ │ flying │   select      │              |
+|  │ └────────┘ └────────┘ └────────┘               │              |
+|  │ Search: [________________]                      │              |
+|  +--------------------------------------------------+             |
++------------------------------------------------------------------+
+```
+
+**Implementation:**
+
+```svelte
+<!-- ContentTypeEditor.svelte -->
+<script>
+  export let fieldType;  // from x-content-type in schema
+  export let currentValue;
+  export let onSelect;
+  export let assets;  // from asset manifest
+
+  const editors = {
+    sprite: SpritePicker,
+    sound: SoundPicker,
+    color: ColorPicker,
+    // ...
+  };
+</script>
+
+<svelte:component this={editors[fieldType]}
+  value={currentValue}
+  {assets}
+  on:select={onSelect}
+/>
+```
+
+### Files to Create
+
+```
+src/lib/ide/
+├── AssetBrowser.svelte       # Sidebar asset browser panel
+├── AssetManifest.js          # Parse/cache asset manifest from engine
+├── content-editors/
+│   ├── SpritePicker.svelte   # Grid picker for sprites
+│   ├── SoundPicker.svelte    # List with play buttons
+│   ├── ColorPicker.svelte    # RGB/hex color picker
+│   ├── FileBrowser.svelte    # File/asset browser
+│   ├── BehaviorPicker.svelte # Behavior selection with config preview
+│   └── EntityPicker.svelte   # Entity type selection
+└── ContentTypeEditor.svelte  # Router component for type-aware editing
+```
+
+### Success Criteria
+
+- [ ] Asset browser shows all sprites/sounds from registry
+- [ ] Typing `sprite:` triggers autocomplete with registered sprites
+- [ ] Clicking a sprite field opens sprite picker overlay
+- [ ] Color fields show color picker with live preview
+- [ ] Asset provenance (author, license) visible in browser
 
 ---
 

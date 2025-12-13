@@ -9,17 +9,21 @@
 |-----------|--------|-------|
 | Monaco Editor | ✅ Working | YAML/Lua syntax, themes |
 | Split-pane layout | ✅ Working | Resizable editor/preview |
-| File tree | 🚧 Partial | UI exists, API not wired |
+| File tree | ✅ Working | API wired, file CRUD working |
 | Preview iframe | ✅ Working | IDE bridge + postMessage |
 | IDE ↔ Engine bridge | ✅ Working | `ide_bridge.js` + `ide_bridge.py` |
+| Hot reload | ✅ Working | **Auto-reload on file change** (reactive) |
 | Engine ready signal | ✅ Working | Hides loading overlay when game starts |
-| JSON schemas | ✅ Complete | game, level, lua_script schemas |
+| JSON schemas | ✅ Complete | game, level, lua_script, assets schemas |
+| Project persistence | ✅ Working | Server API with recursive file listing |
+| WASM compatibility | ✅ Working | Threading, JS/Python boundary fixes |
 | Schema validation | Not wired | Schemas exist but Monaco not configured |
+| **Log streaming** | 🚧 Next | Engine logs to IDE panel via postMessage |
 | Config auto-generation | Not started | No UI generator from schemas |
-| Log streaming | Not started | WebSocket exists but no log forwarding |
+| Asset browser | Not started | Asset registry integration planned |
 | Profiler UI | Not started | No flame graph components |
 | Debugger UI | Not started | No breakpoints/stepping UI |
-| Tailwind/DaisyUI | 🚧 In progress | Migration from vanilla CSS |
+| Tailwind/DaisyUI | ✅ Working | daisyUI components in use |
 
 ## 2. Tech Stack
 
@@ -172,37 +176,53 @@ Missing:
 
 ```svelte
 <script>
-  export let gameYaml = '';
+  export let projectFiles = {};
+  export let engineUrl = '/pygbag/?mode=ide';
 
-  function sendHotReload() {
-    iframe?.contentWindow?.postMessage({
-      type: 'hot_reload',
-      data: { path: 'game.yaml', content: gameYaml }
-    }, '*');
-  }
+  let initialFilesSent = false;
+  let lastFilesHash = '';
 
-  // Debounced reload on gameYaml change
-  $: if (gameYaml && iframe) {
-    clearTimeout(reloadTimeout);
-    reloadTimeout = setTimeout(sendHotReload, 500);
-  }
-
-  // Listen for game messages
-  window.addEventListener('message', (e) => {
-    if (e.data.type === 'lua_crashed') {
-      error = e.data.data.error;
+  // Convert YAML to JSON before sending (PyYAML doesn't work in WASM)
+  function prepareFiles() {
+    const jsonFiles = {};
+    for (const [path, content] of Object.entries(projectFiles)) {
+      if (path.endsWith('.yaml') || path.endsWith('.yml')) {
+        const jsonPath = path.replace(/\.ya?ml$/, '.json');
+        jsonFiles[jsonPath] = yaml.load(content);
+      } else {
+        jsonFiles[path] = content;
+      }
     }
-  });
+    return jsonFiles;
+  }
+
+  // Watch for file changes after initial load (reactive hot reload)
+  $: if (initialFilesSent && engineReady && Object.keys(projectFiles).length > 0) {
+    const newHash = computeFilesHash(projectFiles);
+    if (newHash !== lastFilesHash) {
+      sendFileUpdate();  // Auto-reload on change
+    }
+  }
+
+  // Handle 'ready' message from engine
+  function handleMessage(event) {
+    if (event.data.type === 'ready') {
+      engineReady = true;
+      sendFilesAndReload();  // Initial file send
+    }
+  }
 </script>
 
-<iframe src="/pygbag/" bind:this={iframe} />
+<iframe src={engineUrl} bind:this={iframe} />
 ```
 
 Features:
-- Embeds pygbag game in iframe
-- Hot reload via postMessage
-- Lua crash error display
-- Loading spinner
+- Embeds pygbag game in iframe with IDE mode
+- YAML → JSON conversion (PyYAML not available in WASM)
+- Initial file send on engine ready
+- **Reactive hot reload**: auto-sends files when `projectFiles` changes
+- Hash-based change detection to avoid redundant sends
+- Engine ready signal handling
 
 ### 4.4 Author.svelte (Layout Working)
 **Location:** `src/Author.svelte`
@@ -551,11 +571,32 @@ build: {
 
 ## 9. Implementation Priorities
 
-### Phase 1: Complete MVP Editor
-1. Wire file loading from FileTree selection
-2. Add monaco-yaml for schema validation
-3. Implement IndexedDB file persistence
-4. Wire Save button to persist
+### Phase 1: Complete MVP Editor ✅ COMPLETE
+1. ~~Wire file loading from FileTree selection~~ ✅
+2. ~~Implement server API file persistence~~ ✅
+3. ~~Wire Save button to persist~~ ✅
+4. ~~Wire Run button to hot reload~~ ✅
+5. ~~Reactive hot reload on file change~~ ✅
+6. ~~WASM compatibility fixes~~ ✅
+   - Threading-safe profiling (`ams/profiling.py`)
+   - JS/Python boundary handling (JSON serialization)
+   - `_frame_count` initialization in GameEngine
+
+### Phase 1.1: Log Streaming 🚧 NEXT
+**Goal:** Real-time engine logs in IDE for debugging hot reload and game behavior.
+
+1. Add log forwarding from Python to JS via postMessage
+2. Create LogPanel.svelte component with filtering
+3. Wire to bottom panel in Author.svelte
+4. Add log level filtering (DEBUG, INFO, WARN, ERROR)
+
+See **Section 12: Log Streaming Implementation** below for details.
+
+### Phase 1.5: Asset Registry & Content-Type Editors
+1. Receive asset manifest from engine via postMessage
+2. Build AssetBrowser sidebar component
+3. Implement content-type aware field editors
+4. Wire autocomplete for sprite/sound fields
 
 ### Phase 2: Config Panel
 1. Create ConfigPanel.svelte
@@ -564,18 +605,659 @@ build: {
 4. Wire config changes to hot reload
 
 ### Phase 3: Bottom Panels
-1. Log streaming (WebSocket + UI)
+1. ~~Log streaming~~ (Phase 1.1)
 2. Profiler integration (after `ams/profiling.py`)
 3. Time machine (after rollback exposure)
 4. Debugger (after Fengari debug hooks)
 
 ### Phase 4: Polish
 1. Keyboard shortcuts (Cmd+S, F5, etc.)
-2. Multiple file tabs
-3. Error markers in editor gutter
-4. Mobile-responsive layout
+2. Add monaco-yaml for schema validation
+3. Multiple file tabs
+4. Error markers in editor gutter
+5. Mobile-responsive layout
 
-## 10. Development
+---
+
+## 10. Asset Registry Integration
+
+The engine's `AssetRegistry` discovers asset definitions from `assets/*.json` files. The IDE can leverage this for intelligent editing features.
+
+### Asset Manifest Protocol
+
+```javascript
+// Engine → IDE (on game load)
+{
+  type: 'asset_manifest',
+  sprites: {
+    'duck_flying': { file: 'sprites.png', x: 0, y: 126, width: 37, height: 42 },
+    'duck_left': { file: 'sprites.png', x: 37, y: 126, width: 37, height: 42 },
+    // ...
+  },
+  sounds: {
+    'shot': { file: 'shot.wav', volume: 0.8 },
+    // ...
+  },
+  provenance: {
+    'sprites': { source: 'Nintendo Duck Hunt (NES, 1984)', license: 'proprietary' }
+  }
+}
+```
+
+### Asset Browser Component
+
+```svelte
+<!-- AssetBrowser.svelte -->
+<script>
+  export let manifest = { sprites: {}, sounds: {} };
+  let filter = '';
+  let activeTab = 'sprites';
+
+  $: filteredSprites = Object.entries(manifest.sprites)
+    .filter(([name]) => name.includes(filter));
+
+  $: filteredSounds = Object.entries(manifest.sounds)
+    .filter(([name]) => name.includes(filter));
+</script>
+
+<div class="flex flex-col h-full bg-base-200">
+  <div class="p-2 border-b border-base-300">
+    <input type="text" class="input input-xs w-full"
+      placeholder="Search assets..."
+      bind:value={filter} />
+  </div>
+
+  <div role="tablist" class="tabs tabs-xs tabs-bordered">
+    <button class="tab" class:tab-active={activeTab === 'sprites'}
+      on:click={() => activeTab = 'sprites'}>
+      Sprites ({Object.keys(manifest.sprites).length})
+    </button>
+    <button class="tab" class:tab-active={activeTab === 'sounds'}
+      on:click={() => activeTab = 'sounds'}>
+      Sounds ({Object.keys(manifest.sounds).length})
+    </button>
+  </div>
+
+  <div class="flex-1 overflow-y-auto p-2">
+    {#if activeTab === 'sprites'}
+      <div class="grid grid-cols-3 gap-2">
+        {#each filteredSprites as [name, sprite]}
+          <div class="card card-compact bg-base-100 cursor-pointer hover:ring-2 ring-primary"
+            draggable="true"
+            on:dragstart={(e) => e.dataTransfer.setData('text/plain', `sprite: ${name}`)}>
+            <figure class="h-16 bg-base-300">
+              <!-- Sprite preview rendered by engine -->
+              <img src={sprite.previewUrl} alt={name} class="object-contain h-full" />
+            </figure>
+            <div class="card-body p-1">
+              <p class="text-xs truncate">{name}</p>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {:else}
+      {#each filteredSounds as [name, sound]}
+        <div class="flex items-center gap-2 p-1 hover:bg-base-300 rounded cursor-pointer"
+          draggable="true"
+          on:dragstart={(e) => e.dataTransfer.setData('text/plain', `sound: ${name}`)}>
+          <button class="btn btn-xs btn-circle" on:click={() => playSound(name)}>▶</button>
+          <span class="text-sm flex-1">{name}</span>
+        </div>
+      {/each}
+    {/if}
+  </div>
+</div>
+```
+
+---
+
+## 11. Content-Type Aware Field Editors
+
+When editing YAML fields with `x-content-type` annotations in the JSON Schema, the IDE opens specialized editors instead of plain text input.
+
+### Schema Annotations
+
+The game schema uses `x-content-type` to indicate field types:
+
+```json
+{
+  "properties": {
+    "sprite": {
+      "type": "string",
+      "x-content-type": "sprite",
+      "description": "Reference to a registered sprite name"
+    },
+    "color": {
+      "oneOf": [
+        {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+        {"type": "array", "items": {"type": "integer"}, "minItems": 3, "maxItems": 4}
+      ],
+      "x-content-type": "color"
+    },
+    "transparent": {
+      "type": "array",
+      "x-content-type": "color",
+      "description": "RGB color to treat as transparent"
+    }
+  }
+}
+```
+
+### Content-Type Editor Components
+
+| x-content-type | Component | Features |
+|----------------|-----------|----------|
+| `sprite` | SpritePicker | Grid view, search, drag-drop, preview |
+| `sound` | SoundPicker | List view, play button, search |
+| `color` | ColorPicker | RGB/HSL sliders, hex input, opacity |
+| `file` | FileBrowser | Tree view, upload, preview |
+| `level` | LevelPicker | List levels, click to open editor |
+| `lua` | LuaEditor | Monaco with Lua syntax, `ams.*` completions, error markers |
+| `yaml` | YamlEditor | Monaco with YAML syntax, schema validation, `$ref` support |
+| `behavior` | BehaviorPicker | List behaviors with config schema |
+| `entity_type` | EntityPicker | Entity types with sprite preview |
+
+### Code Field Editors (Lua & YAML)
+
+For fields containing embedded code, the IDE provides dedicated editor panels with full language support.
+
+**Lua Editor (`x-content-type: lua`):**
+
+When the cursor enters a `lua:` field (inline behavior/script), opens a dedicated Lua editor:
+
+```yaml
+behaviors:
+  custom_bounce:
+    lua: |                    # ← click to open Lua editor panel
+      function on_update(entity, dt)
+        if ams.get_y(entity) > 500 then
+          ams.set_vy(entity, -ams.get_vy(entity) * 0.8)
+        end
+      end
+```
+
+**Lua Editor Features:**
+- Monaco with Lua syntax highlighting
+- `ams.*` API autocomplete with signatures:
+  ```
+  ams.get_x(entity_id) → number
+  ams.set_vy(entity_id, vy: number) → nil
+  ams.spawn(type: string, x: number, y: number) → string
+  ```
+- Hover documentation from `lua_api.schema.json`
+- Real-time syntax error highlighting
+- Expand to full-screen mode for complex scripts
+- **Sandbox violation warnings** - immediate feedback on blocked globals
+
+**Sandbox-Aware Linting:**
+
+The Lua runtime sandboxes scripts for security. The IDE warns when users reference blocked globals:
+
+```lua
+function on_update(entity, dt)
+  local f = io.open("file.txt")  -- ⚠️ 'io' is not available (sandboxed)
+  os.execute("cmd")              -- ⚠️ 'os' is not available (sandboxed)
+  require("module")              -- ⚠️ 'require' is not available (sandboxed)
+end
+```
+
+**Blocked Globals** (flagged with warnings):
+| Global | Reason |
+|--------|--------|
+| `io`, `os` | Filesystem/system access |
+| `debug` | Introspection/breakout |
+| `package`, `require` | Dynamic code loading |
+| `loadfile`, `dofile`, `load` | Arbitrary code execution |
+| `rawget`, `rawset` | Metatable bypass |
+| `getmetatable`, `setmetatable` | Sandbox escape vectors |
+| `string.dump` | Bytecode access |
+
+Implementation uses Monaco's `setModelMarkers` to show inline warnings:
+
+```javascript
+// sandbox-lint.js
+const BLOCKED_GLOBALS = [
+  'io', 'os', 'debug', 'package', 'require',
+  'loadfile', 'dofile', 'load',
+  'rawget', 'rawset', 'getmetatable', 'setmetatable'
+];
+
+function lintLuaSandbox(model) {
+  const markers = [];
+  const text = model.getValue();
+
+  for (const global of BLOCKED_GLOBALS) {
+    const regex = new RegExp(`\\b${global}\\b`, 'g');
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const pos = model.getPositionAt(match.index);
+      markers.push({
+        severity: monaco.MarkerSeverity.Warning,
+        message: `'${global}' is not available in sandboxed Lua`,
+        startLineNumber: pos.lineNumber,
+        startColumn: pos.column,
+        endLineNumber: pos.lineNumber,
+        endColumn: pos.column + global.length,
+      });
+    }
+  }
+
+  monaco.editor.setModelMarkers(model, 'sandbox-lint', markers);
+}
+```
+
+**YAML Editor (`x-content-type: yaml`):**
+
+For embedded YAML content (inline levels, config blocks):
+
+```yaml
+levels:
+  - level: level1
+    inline: |                 # ← click to open YAML editor panel
+      entities:
+        - type: brick
+          grid: { cols: 10, rows: 3 }
+```
+
+**YAML Editor Features:**
+- Monaco with YAML syntax highlighting
+- Schema validation against referenced schema (e.g., `level.schema.json`)
+- Autocomplete for known properties
+- Inline error markers for validation failures
+- Expand to full-screen mode
+
+### Trigger Mechanism
+
+Monaco detects cursor position and field type:
+
+```javascript
+// In MonacoEditor.svelte
+editor.onDidChangeCursorPosition((e) => {
+  const position = e.position;
+  const model = editor.getModel();
+  const word = model.getWordAtPosition(position);
+
+  // Parse YAML path to current field
+  const yamlPath = getYamlPath(model, position);  // e.g., "entity_types.duck.sprite"
+
+  // Look up x-content-type in schema
+  const contentType = getContentTypeForPath(schema, yamlPath);
+
+  if (contentType) {
+    dispatch('show-content-editor', {
+      type: contentType,
+      path: yamlPath,
+      currentValue: word?.word,
+      position: editor.getScrolledVisiblePosition(position)
+    });
+  }
+});
+```
+
+### Color Picker Example
+
+```svelte
+<!-- ColorPicker.svelte -->
+<script>
+  export let value = [255, 255, 255];
+  export let format = 'rgb';  // 'rgb' | 'hex'
+
+  let r, g, b, a = 255;
+
+  $: if (Array.isArray(value)) {
+    [r, g, b, a = 255] = value;
+  } else if (typeof value === 'string') {
+    [r, g, b] = hexToRgb(value);
+  }
+
+  $: hexValue = rgbToHex(r, g, b);
+  $: previewStyle = `background-color: rgba(${r}, ${g}, ${b}, ${a/255})`;
+
+  function emit() {
+    const result = format === 'hex' ? hexValue : [r, g, b];
+    dispatch('select', result);
+  }
+</script>
+
+<div class="card bg-base-100 shadow-lg p-4 w-64">
+  <div class="h-12 rounded mb-4" style={previewStyle}></div>
+
+  <div class="space-y-2">
+    <label class="flex items-center gap-2">
+      <span class="w-4 text-error">R</span>
+      <input type="range" class="range range-xs range-error flex-1"
+        min="0" max="255" bind:value={r} on:input={emit} />
+      <input type="number" class="input input-xs w-14"
+        min="0" max="255" bind:value={r} on:input={emit} />
+    </label>
+    <label class="flex items-center gap-2">
+      <span class="w-4 text-success">G</span>
+      <input type="range" class="range range-xs range-success flex-1"
+        min="0" max="255" bind:value={g} on:input={emit} />
+      <input type="number" class="input input-xs w-14"
+        min="0" max="255" bind:value={g} on:input={emit} />
+    </label>
+    <label class="flex items-center gap-2">
+      <span class="w-4 text-info">B</span>
+      <input type="range" class="range range-xs range-info flex-1"
+        min="0" max="255" bind:value={b} on:input={emit} />
+      <input type="number" class="input input-xs w-14"
+        min="0" max="255" bind:value={b} on:input={emit} />
+    </label>
+  </div>
+
+  <div class="divider my-2"></div>
+
+  <label class="flex items-center gap-2">
+    <span class="text-xs">Hex:</span>
+    <input type="text" class="input input-xs flex-1"
+      value={hexValue}
+      on:input={(e) => { [r, g, b] = hexToRgb(e.target.value); emit(); }} />
+  </label>
+</div>
+```
+
+### Files to Create
+
+```
+src/lib/ide/
+├── AssetBrowser.svelte           # Sidebar asset browser
+├── AssetManifest.js              # Asset manifest state management
+├── content-editors/
+│   ├── ContentTypeEditor.svelte  # Router/container component
+│   ├── SpritePicker.svelte       # Sprite grid picker
+│   ├── SoundPicker.svelte        # Sound list with playback
+│   ├── ColorPicker.svelte        # RGB/hex color picker
+│   ├── FileBrowser.svelte        # File tree browser
+│   ├── BehaviorPicker.svelte     # Behavior selector
+│   └── EntityPicker.svelte       # Entity type selector
+└── utils/
+    └── yaml-path.js              # Parse YAML to get cursor path
+```
+
+## 12. Log Streaming Implementation
+
+**Goal:** Real-time engine logs displayed in IDE bottom panel for debugging.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Python Engine (game_runtime.py)                                        │
+│    │                                                                    │
+│    ├─> js_log() calls                                                   │
+│    ├─> ams.logger outputs                                               │
+│    ├─> GameEngine debug prints                                          │
+│    │                                                                    │
+│    ▼                                                                    │
+│  ide_bridge.py captures logs → window.ideBridge.notifyLog(level, msg)   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼ postMessage
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ide_bridge.js                                                          │
+│    └─> sendToIDE('log', {level: 'INFO', message: '...', module: '...'}) │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼ postMessage
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PreviewFrame.svelte                                                    │
+│    └─> dispatch('log', {level, message, module})                        │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼ event
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Author.svelte                                                          │
+│    └─> logs = [...logs, newLog]                                         │
+│    └─> <LogPanel {logs} />                                              │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Log Message Format
+
+```javascript
+// Engine → IDE
+{
+  type: 'log',
+  level: 'INFO',      // DEBUG, INFO, WARN, ERROR
+  module: 'GameEngine',
+  message: 'Loaded 5 entity types',
+  timestamp: 1702400000000
+}
+```
+
+### Python Side: Log Capture
+
+```python
+# In game_runtime.py - add log handler
+
+import logging
+
+class IDELogHandler(logging.Handler):
+    """Forward Python logs to IDE via postMessage."""
+
+    def __init__(self, bridge):
+        super().__init__()
+        self._bridge = bridge
+
+    def emit(self, record):
+        if self._bridge and sys.platform == "emscripten":
+            try:
+                browser_platform.window.ideBridge.notifyLog(
+                    record.levelname,
+                    f"[{record.name}] {record.getMessage()}"
+                )
+            except:
+                pass
+
+# In _init_ide_bridge():
+def _init_ide_bridge(self):
+    # ... existing code ...
+
+    # Add log handler for IDE streaming
+    if self._ide_bridge:
+        handler = IDELogHandler(self._ide_bridge)
+        handler.setLevel(logging.DEBUG)
+        logging.getLogger('ams').addHandler(handler)
+        logging.getLogger('games').addHandler(handler)
+```
+
+### JS Side: Log Protocol Update
+
+```javascript
+// In ide_bridge.js - update notifyLog
+notifyLog: function(level, message, module) {
+    sendToIDE('log', {
+        level: level || 'INFO',
+        message: message,
+        module: module || 'Engine',
+        timestamp: Date.now()
+    });
+}
+```
+
+### Svelte Components
+
+**LogPanel.svelte:**
+
+```svelte
+<script>
+  import { createEventDispatcher } from 'svelte';
+  const dispatch = createEventDispatcher();
+
+  export let logs = [];
+  let filter = { level: 'all', search: '' };
+  let autoScroll = true;
+  let logContainer;
+
+  // Auto-truncation settings (default: 200 lines to prevent memory bloat)
+  let maxLines = 200;
+  const maxLineOptions = [50, 100, 200, 500, 0]; // 0 = unlimited
+  let truncatedCount = 0;
+
+  // Apply truncation when logs exceed limit
+  $: if (maxLines > 0 && logs.length > maxLines) {
+    truncatedCount += logs.length - maxLines;
+    dispatch('truncate', { count: logs.length - maxLines });
+    logs = logs.slice(-maxLines);
+  }
+
+  $: filteredLogs = logs.filter(log => {
+    if (filter.level !== 'all' && log.level !== filter.level) return false;
+    if (filter.search && !log.message.toLowerCase().includes(filter.search.toLowerCase())) return false;
+    return true;
+  });
+
+  $: if (autoScroll && logContainer) {
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+
+  const levelColors = {
+    DEBUG: 'text-base-content/50',
+    INFO: 'text-info',
+    WARN: 'text-warning',
+    ERROR: 'text-error'
+  };
+
+  const levelBadge = {
+    DEBUG: 'badge-ghost',
+    INFO: 'badge-info',
+    WARN: 'badge-warning',
+    ERROR: 'badge-error'
+  };
+
+  function formatTime(ts) {
+    return new Date(ts).toLocaleTimeString('en-US', { hour12: false });
+  }
+
+  function clearLogs() {
+    logs = [];
+    truncatedCount = 0;
+  }
+</script>
+
+<div class="flex flex-col h-full bg-base-200">
+  <!-- Toolbar -->
+  <div class="flex items-center gap-2 px-2 py-1 border-b border-base-300 text-xs">
+    <select class="select select-xs" bind:value={filter.level}>
+      <option value="all">All Levels</option>
+      <option value="DEBUG">DEBUG</option>
+      <option value="INFO">INFO</option>
+      <option value="WARN">WARN</option>
+      <option value="ERROR">ERROR</option>
+    </select>
+
+    <input
+      type="text"
+      class="input input-xs flex-1"
+      placeholder="Filter logs..."
+      bind:value={filter.search}
+    />
+
+    <!-- Auto-truncation limit selector -->
+    <select class="select select-xs w-20" bind:value={maxLines} title="Max log lines">
+      {#each maxLineOptions as opt}
+        <option value={opt}>{opt === 0 ? '∞' : opt}</option>
+      {/each}
+    </select>
+
+    <label class="flex items-center gap-1 cursor-pointer">
+      <input type="checkbox" class="checkbox checkbox-xs" bind:checked={autoScroll} />
+      <span>Auto-scroll</span>
+    </label>
+
+    <button class="btn btn-xs btn-ghost" on:click={clearLogs}>Clear</button>
+
+    <!-- Show truncation indicator when logs have been trimmed -->
+    {#if truncatedCount > 0}
+      <span class="text-warning/70" title="{truncatedCount} older logs removed">
+        ({truncatedCount} trimmed)
+      </span>
+    {/if}
+
+    <span class="text-base-content/50">{filteredLogs.length} logs</span>
+  </div>
+
+  <!-- Log entries -->
+  <div
+    class="flex-1 overflow-y-auto font-mono text-xs"
+    bind:this={logContainer}
+  >
+    {#each filteredLogs as log (log.timestamp + log.message)}
+      <div class="flex gap-2 px-2 py-0.5 hover:bg-base-300 border-b border-base-300/30">
+        <span class="text-base-content/40 w-20 shrink-0">{formatTime(log.timestamp)}</span>
+        <span class="badge badge-xs {levelBadge[log.level]} w-14">{log.level}</span>
+        <span class="{levelColors[log.level]} whitespace-pre-wrap break-all">{log.message}</span>
+      </div>
+    {/each}
+
+    {#if filteredLogs.length === 0}
+      <div class="flex items-center justify-center h-full text-base-content/40">
+        No logs yet. Click "Run" to start the game.
+      </div>
+    {/if}
+  </div>
+</div>
+```
+
+**Author.svelte updates:**
+
+```svelte
+<script>
+  // Add to existing script
+  let logs = [];
+  let showLogPanel = true;
+  let logPanelHeight = 200;
+
+  function handleLog(event) {
+    const log = event.detail;
+    logs = [...logs.slice(-999), log];  // Keep last 1000 logs
+  }
+</script>
+
+<!-- Add bottom panel after editor-container -->
+{#if showLogPanel}
+  <div class="border-t border-base-300" style="height: {logPanelHeight}px">
+    <div class="flex items-center justify-between px-2 py-1 bg-base-300 text-xs">
+      <span class="font-semibold">Console</span>
+      <button class="btn btn-xs btn-ghost" on:click={() => showLogPanel = false}>×</button>
+    </div>
+    <div style="height: calc(100% - 28px)">
+      <LogPanel {logs} />
+    </div>
+  </div>
+{/if}
+
+<!-- Update PreviewFrame to forward logs -->
+<PreviewFrame {projectFiles} on:log={handleLog} />
+```
+
+### Files to Create/Modify
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `src/lib/ide/LogPanel.svelte` | Create | Log display with filtering |
+| `src/Author.svelte` | Modify | Add bottom log panel, wire events |
+| `src/lib/ide/PreviewFrame.svelte` | Modify | Forward 'log' events from engine |
+| `games/browser/game_runtime.py` | Modify | Add IDELogHandler class |
+| `games/browser/ide_bridge.js` | Modify | Update notifyLog with module/timestamp |
+
+### Success Criteria
+
+- [ ] Engine `js_log()` calls appear in IDE log panel
+- [ ] `ams.*` logger outputs appear in IDE
+- [ ] Log level filtering works (DEBUG/INFO/WARN/ERROR)
+- [ ] Search/filter by text works
+- [ ] Auto-scroll follows new logs
+- [ ] Clear button empties log panel
+- [ ] **Auto-truncation**: Panel keeps only last 200 lines by default
+- [ ] Truncation indicator shows "X trimmed" when logs removed
+- [ ] Max lines selector allows 50/100/200/500/unlimited
+- [ ] Logs persist across hot reloads (within session)
+
+---
+
+## 13. Development
 
 ```bash
 # Option 1: Docker (recommended - full stack)
