@@ -170,10 +170,7 @@ class ContentFS:
         if not game_path.exists():
             return False
 
-        # Remove existing game layer if present
-        if 'game' in self._layers:
-            self._multi_fs.remove('game')
-
+        # add_fs overwrites if name already exists
         self._multi_fs.add_fs('game', OSFS(str(game_path)), priority=self.PRIORITY_GAME)
         self._layers['game'] = (game_path, self.PRIORITY_GAME)
         return True
