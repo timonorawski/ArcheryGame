@@ -172,7 +172,7 @@ class ContentFS:
 
         # Remove existing game layer if present
         if 'game' in self._layers:
-            self._multi_fs.remove_fs('game')
+            self._multi_fs.remove('game')
 
         self._multi_fs.add_fs('game', OSFS(str(game_path)), priority=self.PRIORITY_GAME)
         self._layers['game'] = (game_path, self.PRIORITY_GAME)
