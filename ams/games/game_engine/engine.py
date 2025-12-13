@@ -256,6 +256,10 @@ class GameEngine(BaseGame):
         if hasattr(api, 'set_transform_handler'):
             api.set_transform_handler(self._transform_into_type)
 
+        # Register lose_life handler on API so Lua can trigger life loss
+        if hasattr(api, 'set_lose_life_handler'):
+            api.set_lose_life_handler(self.lose_life)
+
         # Register destroy callback for orphan handling
         self._behavior_engine.set_destroy_callback(self._on_entity_destroyed)
 
@@ -1590,6 +1594,9 @@ class GameEngine(BaseGame):
         Args:
             dt: Delta time since last frame
         """
+        # Apply velocity to position for all entities (core physics)
+        self._apply_physics(dt)
+
         # Update behavior engine (moves entities, fires callbacks)
         self._behavior_engine.update(dt)
 
@@ -2008,6 +2015,17 @@ class GameEngine(BaseGame):
                 y=entity.y,
                 attributes=entity.properties,
             )
+
+    def _apply_physics(self, dt: float) -> None:
+        """Apply velocity to position for all entities.
+
+        Core physics step that runs before behaviors/interactions.
+        Entities with non-zero velocity will move automatically.
+        """
+        for entity in self._behavior_engine.get_alive_entities():
+            if entity.vx != 0 or entity.vy != 0:
+                entity.x += entity.vx * dt
+                entity.y += entity.vy * dt
 
     def _check_win_conditions(self) -> None:
         """Check if player has won based on game definition.

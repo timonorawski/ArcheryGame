@@ -43,11 +43,6 @@ entity_types:
     height: 15
     color: blue
     tags: [player]
-    behaviors: [paddle]  # Smooth movement toward target
-    behavior_config:
-      paddle:
-        speed: 500
-        stop_threshold: 1.0
     render:
       - shape: rectangle
         color: blue
@@ -63,6 +58,14 @@ entity_types:
         - when:
             b.active: true
           action: set_target_x
+
+      # Continuous: move paddle toward target_x
+      level:
+        because: continuous
+        action: move_toward_target
+        modifier:
+          speed: 500
+          stop_threshold: 1.0
 
   # paddle_ready: Composite entity showing paddle+ball, transforms on click
   paddle_ready:
@@ -102,12 +105,6 @@ entity_types:
     height: 16
     color: white
     tags: [ball]
-    behaviors: [ball]  # Handles velocity-based movement
-    behavior_config:
-      ball:
-        speed: 300
-        max_speed: 600
-        speed_increase: 5
     render:
       - shape: circle
         color: white
@@ -144,11 +141,9 @@ entity_types:
     height: 25
     color: gray
     tags: [enemy, brick]
-    behaviors: [brick]
-    behavior_config:
-      brick:
-        hits: 1
-        points: 100
+    properties:
+      hits_remaining: 1
+      points: 100
     render:
       # Base brick fill
       - shape: rectangle
@@ -181,23 +176,20 @@ entity_types:
   brick_red:
     extends: brick
     color: red
-    behavior_config:
-      brick:
-        points: 500
+    properties:
+      points: 500
 
   brick_silver:
     extends: brick
     color: silver
-    behavior_config:
-      brick:
-        hits: 3
-        points: 400
+    properties:
+      hits_remaining: 3
+      points: 400
 
   projectile:
     width: 8
     height: 8
     color: red
-    behaviors: [projectile]
     tags: [projectile, hazard]
     render:
       - shape: circle

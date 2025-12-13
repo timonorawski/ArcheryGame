@@ -34,6 +34,7 @@ class GameLuaAPI(LuaAPIBase):
         super().__init__(engine)
         self._spawn_handler: Optional[Callable] = None
         self._transform_handler: Optional[Callable] = None
+        self._lose_life_handler: Optional[Callable] = None
 
     def set_spawn_handler(self, handler: Callable) -> None:
         """Set the spawn handler (called by GameEngine during setup)."""
@@ -42,6 +43,10 @@ class GameLuaAPI(LuaAPIBase):
     def set_transform_handler(self, handler: Callable) -> None:
         """Set the transform handler (called by GameEngine during setup)."""
         self._transform_handler = handler
+
+    def set_lose_life_handler(self, handler: Callable) -> None:
+        """Set the lose_life handler (called by GameEngine during setup)."""
+        self._lose_life_handler = handler
 
     def register_api(self, ams_namespace) -> None:
         """Register game API methods on the ams.* namespace."""
@@ -86,6 +91,7 @@ class GameLuaAPI(LuaAPIBase):
         ams_namespace.get_score = self.get_score
         ams_namespace.add_score = self.add_score
         ams_namespace.get_time = self.get_time
+        ams_namespace.lose_life = self.lose_life
 
         # Events
         ams_namespace.play_sound = self.play_sound
@@ -308,6 +314,11 @@ class GameLuaAPI(LuaAPIBase):
     def add_score(self, points: int) -> None:
         """Add to score."""
         self._engine.score += points
+
+    def lose_life(self) -> None:
+        """Lose a life (delegates to GameEngine)."""
+        if self._lose_life_handler:
+            self._lose_life_handler()
 
     def get_time(self) -> float:
         """Get elapsed game time in seconds."""

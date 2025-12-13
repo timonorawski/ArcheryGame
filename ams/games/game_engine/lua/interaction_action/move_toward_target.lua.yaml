@@ -1,0 +1,47 @@
+description: Move entity smoothly toward paddle_target_x property (continuous interaction)
+lua: |
+  local action = {}
+
+  function action.execute(entity_id, target_id, modifier, context)
+    -- context contains: trigger, target, target_x, target_y, target_active, distance, angle
+    -- Get movement parameters from modifier
+    local speed = modifier.speed or 500
+    local stop_threshold = modifier.stop_threshold or 1.0
+
+    -- Get target X from entity property (set by set_target_x action)
+    local target_x = ams.get_prop(entity_id, "paddle_target_x")
+    if not target_x then
+      return  -- No target set yet
+    end
+
+    -- Get current position
+    local x = ams.get_x(entity_id)
+    local width = ams.get_width(entity_id)
+    local center_x = x + width / 2
+
+    -- Calculate distance to target (target is center, so adjust)
+    local dx = target_x - center_x
+
+    -- Stop if close enough
+    if math.abs(dx) < stop_threshold then
+      return
+    end
+
+    -- Move toward target at speed, clamped by dt
+    -- context doesn't have dt, so we use a fixed approximation
+    -- Better: calculate step based on speed and direction
+    local dt = 1/60  -- Assume 60fps for continuous interactions
+    local max_step = speed * dt
+    local step = math.max(-max_step, math.min(max_step, dx))
+
+    -- Apply movement
+    local new_x = x + step
+
+    -- Clamp to screen bounds
+    local screen_width = ams.get_screen_width()
+    new_x = math.max(0, math.min(screen_width - width, new_x))
+
+    ams.set_x(entity_id, new_x)
+  end
+
+  return action
