@@ -19,6 +19,8 @@ from .filter import FilterEvaluator, InteractionContext, evaluate_filter
 from .trigger import TriggerManager, TriggerEvent, LifecycleManager, LifecycleEvent
 from .system_entities import SystemEntities, InputType
 
+from ams import profiling
+from ams.logging import get_logger
 
 @dataclass
 class MonotonicConfig:
@@ -298,6 +300,7 @@ class InteractionEngine:
         for key in to_remove:
             self._fired_monotonic.discard(key)
 
+    @profiling.profile("interaction_engine", "transform_entity", True)
     def transform_entity(self, entity_id: str, new_type: str) -> None:
         """
         Transform entity to new type.
@@ -310,6 +313,7 @@ class InteractionEngine:
             self._triggers.clear_entity(entity_id)
             self._clear_fired_monotonic(entity_id)
 
+    @profiling.profile("interaction_engine", "update_entity", True)
     def update_entity(
         self,
         entity_id: str,
@@ -325,10 +329,12 @@ class InteractionEngine:
             if attributes:
                 entity.attributes.update(attributes)
 
+    @profiling.profile("interaction_engine", "get_entity", True)
     def get_entity(self, entity_id: str) -> Optional[Entity]:
         """Get entity by ID."""
         return self._entities.get(entity_id)
 
+    @profiling.profile("interaction_engine", "evaluate", True)
     def evaluate(self, dt: float = 0.016) -> List[TriggerEvent]:
         """
         Evaluate all interactions for the current frame.
@@ -475,6 +481,7 @@ class InteractionEngine:
                 interaction_dict,
             )
 
+    @profiling.profile("interaction_engine", "handle_lifecycle", True)
     def handle_lifecycle(
         self,
         entity_id: str,
@@ -542,7 +549,8 @@ class InteractionEngine:
             self._dispatch(event)
 
         return events
-
+    
+    @profiling.profile("interaction_engine", "reset")
     def reset(self) -> None:
         """Reset engine state (e.g., for new level)."""
         self._triggers.reset()

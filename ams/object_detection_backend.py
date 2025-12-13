@@ -6,7 +6,7 @@ Uses pluggable object detectors and ArUco calibration.
 """
 
 import cv2
-import logging
+from ams.logging import get_logger
 import math
 import numpy as np
 import time
@@ -19,7 +19,7 @@ from ams.events import PlaneHitEvent, CalibrationResult
 from calibration.calibration_manager import CalibrationManager
 from models import Point2D
 
-logger = logging.getLogger('ams.object')
+log = get_logger('object_detection_backend')
 from .object_detection import (
     ObjectDetector,
     DetectedObject,
@@ -181,7 +181,7 @@ class ObjectDetectionBackend(DetectionBackend):
             # Filter out impacts outside the projected screen bounds
             # (camera sees more than just the projection surface)
             if not self._is_within_screen_bounds(impact.position):
-                logger.debug(
+                log.debug(
                     f"Filtering out-of-bounds impact at camera ({impact.position.x:.0f}, {impact.position.y:.0f})"
                 )
                 continue
@@ -484,7 +484,7 @@ class ObjectDetectionBackend(DetectionBackend):
             registered_at=timestamp,
             object_id=object_id
         ))
-        logger.debug(f"Added handled stuck object at ({position.x:.0f}, {position.y:.0f})")
+        log.debug(f"Added handled stuck object at ({position.x:.0f}, {position.y:.0f})")
 
     def reset_handled_objects(self) -> None:
         """Clear all handled stuck objects.
@@ -494,7 +494,7 @@ class ObjectDetectionBackend(DetectionBackend):
         count = len(self._handled_objects)
         self._handled_objects.clear()
         if count > 0:
-            logger.info(f"Cleared {count} handled stuck objects")
+            log.info(f"Cleared {count} handled stuck objects")
 
     def _get_impact_point(self, contour: Optional[np.ndarray], detection_pos: Point2D) -> Point2D:
         """Estimate true impact point from contour based on camera viewing angle.
@@ -530,7 +530,7 @@ class ObjectDetectionBackend(DetectionBackend):
 
             return Point2D(x=float(points[idx, 0]), y=float(points[idx, 1]))
         except Exception as e:
-            logger.warning(f"Impact point estimation failed: {e}")
+            log.warning(f"Impact point estimation failed: {e}")
             return detection_pos
 
     def _check_removed_objects(self, current_detections: List[DetectedObject], timestamp: float) -> None:
@@ -557,7 +557,7 @@ class ObjectDetectionBackend(DetectionBackend):
             )
 
             if not still_visible:
-                logger.info(
+                log.info(
                     f"Stuck object may have been removed at "
                     f"({handled.position.x:.0f}, {handled.position.y:.0f})"
                 )
@@ -669,13 +669,13 @@ class ObjectDetectionBackend(DetectionBackend):
             from calibration.pattern_detector import ArucoPatternDetector
             from calibration.homography import compute_homography
         except ImportError as e:
-            logger.warning(f"Calibration dependencies not available: {e}")
+            log.warning(f"Calibration dependencies not available: {e}")
             import traceback
             traceback.print_exc()
             return self._return_no_calibration()
 
         if display_surface is None or display_resolution is None:
-            logger.warning("No display surface provided, skipping geometric calibration")
+            log.warning("No display surface provided, skipping geometric calibration")
             return self._return_no_calibration()
 
         print("\n" + "="*60)
@@ -907,18 +907,18 @@ class ObjectDetectionBackend(DetectionBackend):
             # Save calibration (screen_bounds will be computed when loaded)
             calib_path = "calibration.json"
             calibration_data.save(calib_path)
-            logger.info(f"Calibration saved to {calib_path}")
+            log.info(f"Calibration saved to {calib_path}")
 
             # Update calibration manager if available
             if self.calibration_manager:
                 self.calibration_manager.load_calibration(calib_path)
-                logger.debug("Calibration manager updated")
+                log.debug("Calibration manager updated")
 
                 # Update camera geometry for STUCK mode impact point estimation
                 geometry = self.calibration_manager.get_camera_geometry()
                 if geometry:
                     self._camera_center_x = geometry['camera_center_x']
-                    logger.debug(f"Camera center X set to {self._camera_center_x:.1f}")
+                    log.debug(f"Camera center X set to {self._camera_center_x:.1f}")
 
             return CalibrationResult(
                 success=True,
@@ -930,7 +930,7 @@ class ObjectDetectionBackend(DetectionBackend):
             )
 
         except Exception as e:
-            logger.error(f"Calibration failed: {e}")
+            log.error(f"Calibration failed: {e}")
             import traceback
             traceback.print_exc()
             return self._return_no_calibration()

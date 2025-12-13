@@ -20,7 +20,6 @@ Use this backend to:
 """
 
 from typing import List, Optional, Tuple
-import logging
 import time
 import numpy as np
 import cv2
@@ -28,8 +27,9 @@ import cv2
 from ams.detection_backend import DetectionBackend
 from ams.events import PlaneHitEvent, CalibrationResult
 from ams.camera import CameraInterface
+from ams.logging import get_logger
 
-logger = logging.getLogger('ams.laser')
+log = get_logger('laser_detection')
 
 # Try to import calibration manager - may not be available in all setups
 try:
@@ -97,10 +97,10 @@ class LaserDetectionBackend(DetectionBackend):
         self.debug_frame: Optional[np.ndarray] = None
         self.debug_targets: List[Tuple[float, float, float, tuple]] = []  # (x, y, radius, color) in normalized coords
 
-        logger.info(f"LaserDetectionBackend initialized")
-        logger.info(f"  Camera resolution: {camera.get_resolution()}")
-        logger.info(f"  Brightness threshold: {brightness_threshold}")
-        logger.debug(f"  Latency: {self.detection_latency_ms}ms")
+        log.info("LaserDetectionBackend initialized")
+        log.info("  Camera resolution: %s", camera.get_resolution())
+        log.info("  Brightness threshold: %d", brightness_threshold)
+        log.debug("  Latency: %.1fms", self.detection_latency_ms)
 
     def update(self, dt: float):
         """
@@ -365,24 +365,16 @@ class LaserDetectionBackend(DetectionBackend):
             from calibration.pattern_detector import ArucoPatternDetector
             from calibration.homography import compute_homography
         except ImportError as e:
-            logger.warning(f"Calibration dependencies not available: {e}")
-            import traceback
-            traceback.print_exc()
+            log.warning("Calibration dependencies not available: %s", e)
             return self._return_no_calibration()
 
         if display_surface is None or display_resolution is None:
-            logger.warning("No display surface provided, skipping geometric calibration")
+            log.warning("No display surface provided, skipping geometric calibration")
             return self._return_no_calibration()
 
-        print("\n" + "="*60)
-        print("ArUco Geometric Calibration")
-        print("="*60)
-        print("\nInstructions:")
-        print("1. ArUco marker pattern will be displayed")
-        print("2. Position camera to see entire pattern")
-        print("3. Press SPACE to capture and calibrate")
-        print("4. Press ESC to skip calibration")
-        print("\nStarting in 3 seconds...")
+        log.info("ArUco Geometric Calibration")
+        log.info("Instructions: 1) Pattern displayed 2) Position camera 3) SPACE to capture 4) ESC to skip")
+        log.info("Starting in 3 seconds...")
 
         import time
         time.sleep(3)
@@ -407,11 +399,7 @@ class LaserDetectionBackend(DetectionBackend):
         captured = False
         camera_frame = None
 
-        print("\nLIVE CAMERA PREVIEW:")
-        print("  - Position camera to see entire pattern")
-        print("  - Wait for marker count to reach 12+ (shown in preview window)")
-        print("  - Press SPACE when markers are detected")
-        print("  - Press ESC to skip calibration")
+        log.info("Live camera preview - position camera to see pattern, SPACE to capture")
 
         # Import detector for live preview
         detector = ArucoPatternDetector(config.aruco_dict)
@@ -466,9 +454,9 @@ class LaserDetectionBackend(DetectionBackend):
                         # Capture current frame (already in 'frame' variable)
                         camera_frame = frame
                         captured = True
-                        print(f"Frame captured! Detected {count} markers")
+                        log.info("Frame captured! Detected %d markers", count)
                     elif event.key == pygame.K_ESCAPE:
-                        print("Calibration skipped")
+                        log.info("Calibration skipped")
                         cv2.destroyAllWindows()
                         return self._return_no_calibration()
 
@@ -477,9 +465,9 @@ class LaserDetectionBackend(DetectionBackend):
             if key == 32:  # SPACE
                 camera_frame = frame
                 captured = True
-                print(f"Frame captured! Detected {count} markers")
+                log.info("Frame captured! Detected %d markers", count)
             elif key == 27:  # ESC
-                print("Calibration skipped")
+                log.info("Calibration skipped")
                 cv2.destroyAllWindows()
                 return self._return_no_calibration()
 
@@ -491,10 +479,10 @@ class LaserDetectionBackend(DetectionBackend):
         detected_markers, _ = detector.detect_markers(camera_frame)
 
         if len(detected_markers) < 4:
-            print(f"ERROR: Only {len(detected_markers)} markers detected, need at least 4")
+            log.error("Only %d markers detected, need at least 4", len(detected_markers))
             return self._return_no_calibration()
 
-        print(f"Detected {len(detected_markers)} markers")
+        log.info("Detected %d markers", len(detected_markers))
 
         # Create point correspondences (match detected markers with known positions)
         camera_points, projector_points = detector.create_point_correspondences(
@@ -502,21 +490,20 @@ class LaserDetectionBackend(DetectionBackend):
             marker_positions
         )
 
-        print(f"Matched {len(camera_points)} point pairs for homography computation")
+        log.info("Matched %d point pairs for homography computation", len(camera_points))
 
         if len(camera_points) < 4:
-            print(f"ERROR: Need at least 4 matched pairs, got {len(camera_points)}")
+            log.error("Need at least 4 matched pairs, got %d", len(camera_points))
             return self._return_no_calibration()
 
         # Compute homography
         try:
             homography, inlier_mask, quality = compute_homography(camera_points, projector_points)
 
-            print(f"Homography computed successfully!")
-            print(f"  RMS error: {quality.reprojection_error_rms:.2f}px")
-            print(f"  Max error: {quality.reprojection_error_max:.2f}px")
-            print(f"  Inliers: {quality.num_inliers}/{quality.num_total_points}")
-            print(f"  Quality: {'GOOD' if quality.is_acceptable else 'POOR'}")
+            log.info("Homography computed: RMS=%.2fpx Max=%.2fpx Inliers=%d/%d Quality=%s",
+                     quality.reprojection_error_rms, quality.reprojection_error_max,
+                     quality.num_inliers, quality.num_total_points,
+                     'GOOD' if quality.is_acceptable else 'POOR')
 
             # Create calibration data
             cam_width, cam_height = self.camera.get_resolution()
@@ -532,12 +519,12 @@ class LaserDetectionBackend(DetectionBackend):
             # Save calibration
             calib_path = "calibration.json"
             calibration_data.save(calib_path)
-            print(f"Calibration saved to {calib_path}")
+            log.info("Calibration saved to %s", calib_path)
 
             # Update calibration manager if available
             if self.calibration_manager and CALIBRATION_AVAILABLE:
                 self.calibration_manager.load_calibration(calib_path)
-                print("Calibration manager updated")
+                log.info("Calibration manager updated")
 
             return CalibrationResult(
                 success=True,
@@ -549,9 +536,7 @@ class LaserDetectionBackend(DetectionBackend):
             )
 
         except Exception as e:
-            print(f"ERROR during calibration: {e}")
-            import traceback
-            traceback.print_exc()
+            log.exception("Error during calibration: %s", e)
             return self._return_no_calibration()
 
     def _return_no_calibration(self):
@@ -593,18 +578,17 @@ class LaserDetectionBackend(DetectionBackend):
                 - Extreme low light: 10-50
         """
         self.brightness_threshold = max(10, min(255, threshold))
-        print(f"Brightness threshold updated to: {self.brightness_threshold}")
+        log.debug("Brightness threshold updated to: %d", self.brightness_threshold)
 
     def set_debug_mode(self, enabled: bool):
         """Enable/disable debug visualization."""
         self.debug_mode = enabled
-        print(f"Debug mode: {'enabled' if enabled else 'disabled'}")
+        log.debug("Debug mode: %s", 'enabled' if enabled else 'disabled')
 
     def toggle_bw_mode(self):
         """Toggle black/white threshold view (helps with tuning)."""
         self.debug_bw_mode = not self.debug_bw_mode
-        print(f"B/W threshold view: {'enabled' if self.debug_bw_mode else 'disabled'}")
-        print(f"  (Shows exactly what's above brightness threshold)")
+        log.debug("B/W threshold view: %s", 'enabled' if self.debug_bw_mode else 'disabled')
 
     def get_debug_frame(self) -> Optional[np.ndarray]:
         """Get the latest debug visualization frame."""

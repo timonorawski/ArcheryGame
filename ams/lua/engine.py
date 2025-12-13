@@ -563,7 +563,7 @@ class LuaEngine:
             log.error(f"Error executing collision action {action_name}: {e}, entity_a={entity_a.id} (type={entity_a.entity_type}), entity_b={entity_b.id} (type={entity_b.entity_type}), modifier={modifier}")
             return False
 
-    @profiling.profile("lua_engine", "Interaction Action")
+    @profiling.profile("lua_engine", "Interaction Action", True)
     def execute_interaction_action(
         self,
         action_name: str,

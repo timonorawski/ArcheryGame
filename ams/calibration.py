@@ -16,12 +16,12 @@ then seamlessly transition to CV detection without code changes.
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-import logging
+from ams.logging import get_logger
 
 from ams.events import CalibrationResult
 from ams.detection_backend import DetectionBackend
 
-logger = logging.getLogger('ams.calibration')
+log = get_logger('calibration')
 
 
 class CalibrationSession:
@@ -111,7 +111,7 @@ class CalibrationSession:
                 else:
                     backend_result = self.backend.calibrate()
             except Exception as e:
-                logger.warning(f"Backend calibration error: {e}")
+                log.warning(f"Backend calibration error: {e}")
                 backend_result = self.backend.calibrate()
         else:
             backend_result = self.backend.calibrate()

@@ -195,17 +195,20 @@ class GameLuaAPI(LuaAPIBase):
     # Entity Access - State
     # =========================================================================
 
+    @profiling.profile("lua_api", "ams.get_health")
     def get_health(self, entity_id: str) -> int:
         """Get entity health."""
         entity = self._engine.get_entity(entity_id)
         return entity.health if entity else 0
 
+    @profiling.profile("lua_api", "ams.set_health")
     def set_health(self, entity_id: str, health: int) -> None:
         """Set entity health."""
         entity = self._engine.get_entity(entity_id)
         if entity:
             entity.health = health
 
+    @profiling.profile("lua_api", "ams.is_alive")
     def is_alive(self, entity_id: str) -> bool:
         """Check if entity is alive."""
         entity = self._engine.get_entity(entity_id)
@@ -325,27 +328,33 @@ class GameLuaAPI(LuaAPIBase):
     # Game State
     # =========================================================================
 
+    @profiling.profile("lua_api", "ams.get_screen_width")
     def get_screen_width(self) -> float:
         """Get game screen width."""
         return self._engine.screen_width
 
+    @profiling.profile("lua_api", "ams.get_screen_height")
     def get_screen_height(self) -> float:
         """Get game screen height."""
         return self._engine.screen_height
 
+    @profiling.profile("lua_api", "ams.get_score")
     def get_score(self) -> int:
         """Get current score."""
         return self._engine.score
 
+    @profiling.profile("lua_api", "ams.add_score")
     def add_score(self, points: int) -> None:
         """Add to score."""
         self._engine.score += points
 
+    @profiling.profile("lua_api", "ams.lose_life")
     def lose_life(self) -> None:
         """Lose a life (delegates to GameEngine)."""
         if self._lose_life_handler:
             self._lose_life_handler()
 
+    @profiling.profile("lua_api", "ams.get_time")
     def get_time(self) -> float:
         """Get elapsed game time in seconds."""
         return self._engine.elapsed_time
@@ -368,6 +377,7 @@ class GameLuaAPI(LuaAPIBase):
     # Parent-Child Relationships
     # =========================================================================
 
+    @profiling.profile("lua_api", "ams.get_parent_id")
     def get_parent_id(self, entity_id: str) -> str:
         """Get parent entity ID, or empty string if no parent."""
         entity = self._engine.get_entity(entity_id)
@@ -375,6 +385,7 @@ class GameLuaAPI(LuaAPIBase):
             return entity.parent_id
         return ""
 
+    @profiling.profile("lua_api", "ams.set_parent")
     def set_parent(self, entity_id: str, parent_id: str,
                    offset_x: float = 0.0, offset_y: float = 0.0) -> None:
         """
@@ -415,10 +426,12 @@ class GameLuaAPI(LuaAPIBase):
             entity.properties.pop("_parent_offset_x", None)
             entity.properties.pop("_parent_offset_y", None)
 
+    @profiling.profile("lua_api", "ams.detach_from_parent")
     def detach_from_parent(self, entity_id: str) -> None:
         """Detach entity from its parent."""
         self.set_parent(entity_id, "")
 
+    @profiling.profile("lua_api", "ams.get_children")
     @lua_safe_function
     def get_children(self, entity_id: str) -> list[str]:
         """Get IDs of all child entities."""
@@ -427,6 +440,7 @@ class GameLuaAPI(LuaAPIBase):
             return list(entity.children)
         return []
 
+    @profiling.profile("lua_api", "ams.has_parent")
     def has_parent(self, entity_id: str) -> bool:
         """Check if entity has a parent."""
         entity = self._engine.get_entity(entity_id)
