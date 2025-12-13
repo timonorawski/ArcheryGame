@@ -3,12 +3,15 @@
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from ams.logging import get_logger
 from ams.yaml import (
     load_schema,
     HAS_JSONSCHEMA,
     SKIP_VALIDATION,
     SchemaValidationError,
 )
+
+log = get_logger('schema')
 
 
 _game_schema: Optional[Dict[str, Any]] = None
@@ -41,13 +44,13 @@ def validate_game_yaml(data: Dict[str, Any], source_path: Optional[Path] = None)
     if schema is None:
         error_msg = f"Schema file not found: {_SCHEMAS_DIR / 'game.schema.json'}"
         if SKIP_VALIDATION:
-            print(f"[GameEngine] Warning: {error_msg}")
+            log.warning(error_msg)
             return
         raise SchemaValidationError(error_msg)
 
     if not HAS_JSONSCHEMA:
         # jsonschema not available (e.g., browser/WASM builds)
-        print(f"[GameEngine] Warning: Schema validation skipped (jsonschema not available)")
+        log.warning("Schema validation skipped (jsonschema not available)")
         return
 
     import jsonschema
@@ -86,19 +89,19 @@ def validate_game_yaml(data: Dict[str, Any], source_path: Optional[Path] = None)
         path_str = f" in {source_path}" if source_path else ""
         error_msg = f"Schema validation error{path_str}: {e.message} at {'/'.join(str(p) for p in e.absolute_path)}"
         if SKIP_VALIDATION:
-            print(f"[GameEngine] Warning: {error_msg}")
+            log.warning(error_msg)
         else:
             raise SchemaValidationError(error_msg, errors=[str(e)], path=source_path) from e
     except jsonschema.SchemaError as e:
         error_msg = f"Invalid schema: {e.message}"
         if SKIP_VALIDATION:
-            print(f"[GameEngine] Warning: {error_msg}")
+            log.warning(error_msg)
         else:
             raise SchemaValidationError(error_msg) from e
     except (OSError, IOError) as e:
         # Handle network errors (e.g., offline mode trying to fetch remote schemas)
         error_msg = f"Schema validation failed (network error): {e}"
         if SKIP_VALIDATION:
-            print(f"[GameEngine] Warning: {error_msg}")
+            log.warning(error_msg)
         else:
             raise SchemaValidationError(error_msg) from e

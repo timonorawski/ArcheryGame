@@ -21,8 +21,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, TYPE_CHECKING, Tuple
 
+from ams.logging import get_logger
 from ams.yaml import loads as yaml_loads, HAS_YAML
 from ams.games.game_engine.config import SpriteConfig, SoundConfig
+
+log = get_logger('asset_registry')
 
 if TYPE_CHECKING:
     from ams.content_fs import ContentFS
@@ -109,7 +112,7 @@ class AssetRegistry:
                 for file_path in self._content_fs.walk_files(assets_path, filter_glob=[ext]):
                     self._process_registration_file_content_fs(file_path)
         except Exception as e:
-            print(f"[AssetRegistry] Error walking {assets_path}: {e}")
+            log.error(f"Error walking {assets_path}: {e}")
 
     def _discover_via_filesystem(self, assets_dir: Path) -> None:
         """Discover using direct filesystem access."""
@@ -144,7 +147,7 @@ class AssetRegistry:
                 self._register_image(data, file_path)
 
         except Exception as e:
-            print(f"[AssetRegistry] Failed to process {file_path}: {e}")
+            log.error(f"Failed to process {file_path}: {e}")
 
     def _process_registration_file_filesystem(self, file_path: Path, assets_dir: Path) -> None:
         """Process a single registration file (YAML or JSON) via filesystem."""
@@ -170,7 +173,7 @@ class AssetRegistry:
                 self._register_image(data, rel_path)
 
         except Exception as e:
-            print(f"[AssetRegistry] Failed to process {file_path}: {e}")
+            log.error(f"Failed to process {file_path}: {e}")
 
     def _detect_asset_type(self, data: Dict[str, Any], file_path: str) -> Optional[str]:
         """Detect asset type from file content or path.
@@ -316,7 +319,7 @@ class AssetRegistry:
             if name not in self._registered.sprites:
                 return
             if name in visited:
-                print(f"[AssetRegistry] Circular sprite inheritance: {name}")
+                log.warning(f"Circular sprite inheritance: {name}")
                 return
 
             visited = visited | {name}

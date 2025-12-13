@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from ams.logging import get_logger
 from ams.yaml import (
     load as yaml_load,
     loads as yaml_loads,
@@ -49,6 +50,8 @@ from ams.yaml import (
     HAS_JSONSCHEMA,
     SchemaValidationError,
 )
+
+log = get_logger('script_loader')
 
 
 @dataclass
@@ -152,12 +155,10 @@ class ScriptLoader:
         self._schema_path = schema_path
 
         if validate and not HAS_YAML:
-            import warnings
-            warnings.warn("PyYAML not installed; .lua.yaml validation disabled")
+            log.warning("PyYAML not installed; .lua.yaml validation disabled")
 
         if validate and not HAS_JSONSCHEMA:
-            import warnings
-            warnings.warn("jsonschema not installed; schema validation disabled")
+            log.warning("jsonschema not installed; schema validation disabled")
 
     @property
     def schema(self) -> Optional[Dict]:
@@ -275,8 +276,7 @@ class ScriptLoader:
             if self.strict:
                 raise ScriptValidationError(str(e), path=str(path), errors=e.errors)
             else:
-                import warnings
-                warnings.warn(f"{path}: {e}")
+                log.warning(f"{path}: {e}")
 
     def load_inline(
         self,
@@ -348,8 +348,7 @@ class ScriptLoader:
             except Exception as e:
                 if self.strict:
                     raise
-                import warnings
-                warnings.warn(f"Failed to load {path}: {e}")
+                log.warning(f"Failed to load {path}: {e}")
 
         return scripts
 

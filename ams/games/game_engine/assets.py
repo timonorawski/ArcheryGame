@@ -9,6 +9,9 @@ from typing import Dict, Optional
 import pygame
 
 from ams.games.game_engine.config import GameDefinition, SoundConfig, SpriteConfig
+from ams.logging import get_logger
+
+log = get_logger('assets')
 
 
 class AssetProvider:
@@ -80,7 +83,7 @@ class AssetProvider:
                 if sound_path.exists():
                     self._sounds[name] = pygame.mixer.Sound(str(sound_path))
         except Exception as e:
-            print(f"[AssetProvider] Failed to load sound '{name}': {e}")
+            log.error(f"Failed to load sound '{name}': {e}")
 
     def _load_sound_from_data_uri(self, data_uri: str) -> Optional[pygame.mixer.Sound]:
         """Load a sound from a data URI (data:audio/wav;base64,...)."""
@@ -91,7 +94,7 @@ class AssetProvider:
             audio_bytes = base64.b64decode(encoded)
             return pygame.mixer.Sound(io.BytesIO(audio_bytes))
         except Exception as e:
-            print(f"[AssetProvider] Failed to load sound from data URI: {e}")
+            log.error(f"Failed to load sound from data URI: {e}")
             return None
 
     # --- Sprite Loading ---
@@ -130,7 +133,7 @@ class AssetProvider:
                     sprite_path = self._assets_dir / config.file
 
                 if not sprite_path.exists():
-                    print(f"[AssetProvider] Sprite file not found: {sprite_path}")
+                    log.warning(f"Sprite file not found: {sprite_path}")
                     return
 
                 sheet_key = str(sprite_path)
@@ -164,7 +167,7 @@ class AssetProvider:
             self._sprites[name] = sprite
 
         except Exception as e:
-            print(f"[AssetProvider] Failed to load sprite '{name}': {e}")
+            log.error(f"Failed to load sprite '{name}': {e}")
 
     def _load_image_from_data_uri(self, data_uri: str) -> Optional[pygame.Surface]:
         """Load an image from a data URI (data:image/png;base64,...)."""
@@ -175,5 +178,5 @@ class AssetProvider:
             image_bytes = base64.b64decode(encoded)
             return pygame.image.load(io.BytesIO(image_bytes)).convert()
         except Exception as e:
-            print(f"[AssetProvider] Failed to load image from data URI: {e}")
+            log.error(f"Failed to load image from data URI: {e}")
             return None

@@ -25,6 +25,9 @@ from lupa import LuaRuntime
 from .entity import Entity
 from .api import LuaAPIBase
 from ams import profiling
+from ams.logging import get_logger
+
+log = get_logger('lua_engine')
 
 if TYPE_CHECKING:
     from ams.content_fs import ContentFS
@@ -45,7 +48,7 @@ def _init_script_loader():
         ScriptMetadata = SM
         HAS_SCRIPT_LOADER = True
     except ImportError as e:
-        print(f"[LuaEngine] ScriptLoader import failed: {e}")
+        log.warning(f"ScriptLoader import failed: {e}")
         HAS_SCRIPT_LOADER = False
 
 
@@ -321,7 +324,7 @@ class LuaEngine:
 
         if failures:
             for f in failures:
-                print(f'[LuaEngine] SANDBOX FAILURE: {f}')
+                log.error(f'SANDBOX FAILURE: {f}')
             raise RuntimeError(
                 f'Lua sandbox validation failed with {len(failures)} issue(s). '
                 'This is a security risk - refusing to continue.'
@@ -405,14 +408,14 @@ class LuaEngine:
             result = self._lua.execute(lua_code)
 
             if result is None:
-                print(f"[LuaEngine] Inline {sub_type}/{name} did not return a table")
+                log.warning(f"Inline {sub_type}/{name} did not return a table")
                 return False
 
             self._subroutines[sub_type][name] = result
             return True
 
         except Exception as e:
-            print(f"[LuaEngine] Error loading inline {sub_type}/{name}: {e}")
+            log.error(f"Error loading inline {sub_type}/{name}: {e}")
             return False
 
     def load_subroutines_from_dir(self, sub_type: str, content_dir: str) -> int:
@@ -457,11 +460,11 @@ class LuaEngine:
 
         if not HAS_SCRIPT_LOADER:
             # Fall back to treating as raw Lua (just extract code)
-            print(f"[LuaEngine._load_yaml_subroutine] ScriptLoader not available, skipping {content_path}")
+            log.debug(f"ScriptLoader not available, skipping {content_path}")
             return False
 
         if not self._content_fs.exists(content_path):
-            print(f"[LuaEngine._load_yaml_subroutine] Subroutine not found: {content_path}")
+            log.warning(f"Subroutine not found: {content_path}")
             return False
 
         try:
@@ -484,16 +487,16 @@ class LuaEngine:
                 result = getattr(g, name, None)
 
             if result is None:
-                print(f"[LuaEngine._load_yaml_subroutine] Subroutine {name} did not return a table")
+                log.warning(f"Subroutine {name} did not return a table")
                 return False
 
             self._subroutines[sub_type][name] = result
-            print(f"[LuaEngine._load_yaml_subroutine] Subroutine loaded: [{sub_type}][{name}] from {content_path}")
+            log.debug(f"Subroutine loaded: [{sub_type}][{name}] from {content_path}")
 
             return True
 
         except Exception as e:
-            print(f"[LuaEngine._load_yaml_subroutine] Error loading {sub_type}/{name}.lua.yaml: {e}")
+            log.error(f"Error loading {sub_type}/{name}.lua.yaml: {e}")
             return False
 
     def get_subroutine(self, sub_type: str, name: str) -> Optional[Any]:
@@ -544,7 +547,7 @@ class LuaEngine:
 
         execute_fn = getattr(action, 'execute', None)
         if not execute_fn:
-            print(f"[LuaEngine] Collision action {action_name} has no execute function")
+            log.error(f"Collision action {action_name} has no execute function")
             return False
 
         try:
@@ -557,11 +560,7 @@ class LuaEngine:
             return True
 
         except Exception as e:
-            print(f"[LuaEngine] Error executing collision action {action_name}: {e}")
-            print(f"  entity_a: {entity_a.id} (type={entity_a.entity_type})")
-            print(f"  entity_b: {entity_b.id} (type={entity_b.entity_type})")
-            if modifier:
-                print(f"  modifier: {modifier}")
+            log.error(f"Error executing collision action {action_name}: {e}, entity_a={entity_a.id} (type={entity_a.entity_type}), entity_b={entity_b.id} (type={entity_b.entity_type}), modifier={modifier}")
             return False
 
     @profiling.profile("lua_engine", "Interaction Action")
@@ -603,7 +602,7 @@ class LuaEngine:
 
         execute_fn = getattr(action, 'execute', None)
         if not execute_fn:
-            print(f"[LuaEngine] Interaction action {action_name} has no execute function")
+            log.error(f"Interaction action {action_name} has no execute function")
             return False
 
         try:
@@ -615,13 +614,6 @@ class LuaEngine:
             return True
 
         except Exception as e:
-            print(f"[LuaEngine] Error executing interaction action {action_name}: {e}")
-            print(f"  entity_a: {entity_a.id} (type={entity_a.entity_type})")
-            print(f"  entity_b: {entity_b.id} (type={entity_b.entity_type})")
-            if modifier:
-                print(f"  modifier: {modifier}")
-            if context:
-                print(f"  context: {context}")
             import traceback
             exc = e
             if exc:
@@ -629,9 +621,8 @@ class LuaEngine:
             else:
                 tb_lines = traceback.format_exc().split('\n')
 
-            for line in tb_lines:
-                if line.strip():
-                    print(line)
+            tb_str = '\n'.join(line for line in tb_lines if line.strip())
+            log.error(f"Error executing interaction action {action_name}: {e}, entity_a={entity_a.id} (type={entity_a.entity_type}), entity_b={entity_b.id} (type={entity_b.entity_type}), modifier={modifier}, context={context}\n{tb_str}")
             return False
 
     @profiling.profile("lua_engine", "Input Action")
@@ -668,7 +659,7 @@ class LuaEngine:
 
         execute_fn = getattr(action, 'execute', None)
         if not execute_fn:
-            print(f"[LuaEngine] Input action {action_name} has no execute function")
+            log.error(f"Input action {action_name} has no execute function")
             return False
 
         try:
@@ -681,7 +672,7 @@ class LuaEngine:
             return True
 
         except Exception as e:
-            print(f"[LuaEngine] Error executing input action {action_name}: {e}")
+            log.error(f"Error executing input action {action_name}: {e}, x={x}, y={y}, args={args}")
             return False
 
     def call_generator(
@@ -716,7 +707,7 @@ class LuaEngine:
 
         generate_fn = getattr(generator, 'generate', None)
         if not generate_fn:
-            print(f"[LuaEngine] Generator {name} has no generate function")
+            log.error(f"Generator {name} has no generate function")
             return None
 
         try:
@@ -729,7 +720,7 @@ class LuaEngine:
             return result
 
         except Exception as e:
-            print(f"[LuaEngine] Error calling generator {name}: {e}")
+            log.error(f"Error calling generator {name}: {e}, args={args}")
             return None
 
     def register_entity(self, entity: Entity) -> None:
@@ -801,8 +792,7 @@ class LuaEngine:
                 return result
 
         except Exception as e:
-            print(f"[LuaEngine] Lua error in expression: {e}")
-            print(f"  Expression: {expression[:100]}...")
+            log.error(f"Lua error in expression: {e}, expression: {expression[:100]}...")
             return None
 
     def set_global(self, name: str, value: Any) -> None:

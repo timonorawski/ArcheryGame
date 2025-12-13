@@ -14,8 +14,12 @@ from typing import Callable, Any, TYPE_CHECKING
 import math
 import random
 
+from ams.logging import get_logger
+
 if TYPE_CHECKING:
     from .engine import LuaEngine
+
+log = get_logger('lua_api')
 
 
 def _to_lua_value(value: Any, lua_runtime) -> Any:
@@ -244,4 +248,4 @@ class LuaAPIBase:
 
     def log(self, message: str) -> None:
         """Log a debug message."""
-        print(f"[Lua] {message}")
+        log.debug(message)

@@ -27,6 +27,9 @@ import pygame
 
 # Unified YAML/JSON loader (handles browser/WASM fallback)
 from ams.yaml import load as yaml_load, HAS_YAML
+from ams.logging import get_logger
+
+log = get_logger('game_engine')
 
 from ams.games.base_game import BaseGame
 from ams.games.game_state import GameState
@@ -621,21 +624,21 @@ class GameEngine(BaseGame):
 
             for name, script_def in section_data.items():
                 if not isinstance(script_def, dict):
-                    print(f"[GameEngine] Invalid inline script '{name}': expected dict")
+                    log.error(f"Invalid inline script '{name}': expected dict")
                     continue
 
                 lua_code = script_def.get('lua')
                 if not lua_code:
-                    print(f"[GameEngine] Inline script '{name}' missing 'lua' field")
+                    log.error(f"Inline script '{name}' missing 'lua' field")
                     continue
 
                 # Load via LuaEngine's inline loader
                 if self._behavior_engine.load_inline_subroutine(sub_type, name, lua_code):
                     desc = script_def.get('description', '')
                     if desc:
-                        print(f"[GameEngine] Loaded inline {sub_type}: {name} - {desc[:50]}")
+                        log.debug(f"Loaded inline {sub_type}: {name} - {desc[:50]}")
                 else:
-                    print(f"[GameEngine] Failed to load inline {sub_type}: {name}")
+                    log.error(f"Failed to load inline {sub_type}: {name}")
 
     def _register_entity_interactions(self) -> None:
         """Register entity type interactions with the InteractionEngine.
@@ -691,9 +694,9 @@ class GameEngine(BaseGame):
                 if self._behavior_engine.load_inline_subroutine('behavior', name, lua_code):
                     behavior_names.append(name)
                     if 'description' in item:
-                        print(f"[GameEngine] Loaded inline behavior: {item['description'][:50]}")
+                        log.debug(f"Loaded inline behavior: {item['description'][:50]}")
                 else:
-                    print(f"[GameEngine] Failed to load inline behavior for {entity_type}")
+                    log.error(f"Failed to load inline behavior for {entity_type}")
 
         return behavior_names
 
@@ -758,7 +761,7 @@ class GameEngine(BaseGame):
                 if self._behavior_engine.load_inline_subroutine('collision_action', name, lua_code):
                     return name
                 else:
-                    print(f"[GameEngine] Failed to load inline collision action for {type_a}->{type_b}")
+                    log.error(f"Failed to load inline collision action for {type_a}->{type_b}")
                     return ''
 
         return ''
@@ -795,7 +798,7 @@ class GameEngine(BaseGame):
                 if self._behavior_engine.load_inline_subroutine('input_action', name, lua_code):
                     action_name = name
                 else:
-                    print(f"[GameEngine] Failed to load inline input action")
+                    log.error(f"Failed to load inline input action")
 
         return InputAction(
             transform=transform_config,
@@ -908,7 +911,7 @@ class GameEngine(BaseGame):
                 return SpriteConfig(file='', data=None)
 
             if name in visited:
-                print(f"[GameEngine] Circular sprite inheritance detected: {name}")
+                log.error(f"Circular sprite inheritance detected: {name}")
                 return SpriteConfig(file='', data=None)
 
             visited.add(name)
@@ -2324,7 +2327,7 @@ class GameEngine(BaseGame):
                         evaluated_args[k] = self._evaluate_property_value(v)
                     return self._behavior_engine.call_generator(name, evaluated_args)
                 else:
-                    print(f"[GameEngine] Failed to load inline generator")
+                    log.error(f"Failed to load inline generator")
                     return None
             elif 'lua' in value:
                 # Simple Lua expression
@@ -2453,7 +2456,7 @@ class GameEngine(BaseGame):
             try:
                 method(entity.id, *args)
             except Exception as e:
-                print(f"[GameEngine] Error in {behavior_name}.{method_name}: {e}")
+                log.error(f"Error in {behavior_name}.{method_name}: {e}")
 
     def dispatch_scheduled(
         self, callback_name: str, entity: 'Entity', lua_engine: 'LuaEngine'
@@ -2481,4 +2484,4 @@ class GameEngine(BaseGame):
                 try:
                     callback(entity.id)
                 except Exception as e:
-                    print(f"[GameEngine] Error in scheduled {callback_name}: {e}")
+                    log.error(f"Error in scheduled {callback_name}: {e}")

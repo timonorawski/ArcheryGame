@@ -15,9 +15,12 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from ams.lua.api import LuaAPIBase, lua_safe_function
 from ams import profiling
+from ams.logging import get_logger
 
 if TYPE_CHECKING:
     from ams.lua.engine import LuaEngine
+
+log = get_logger('game_lua_api')
 
 
 class GameLuaAPI(LuaAPIBase):
@@ -227,15 +230,18 @@ class GameLuaAPI(LuaAPIBase):
             True if transform succeeded
         """
         if not self._transform_handler:
-            print("[GameLuaAPI] No transform handler registered")
+            log.error("No transform handler registered")
             return False
 
         entity = self._engine.get_entity(entity_id)
         if not entity:
+            log.debug("Transform failed: entity %s not found", entity_id)
             return False
 
         result = self._transform_handler(entity, into_type)
-        return result is not None
+        success = result is not None
+        log.debug("Transform entity_id=%s into_type=%s success=%s", entity_id, into_type, success)
+        return success
 
     # =========================================================================
     # Entity Spawning
@@ -266,7 +272,7 @@ class GameLuaAPI(LuaAPIBase):
             sprite = opts.get('sprite', sprite)
 
         if not self._spawn_handler:
-            print("[GameLuaAPI] No spawn handler registered")
+            log.error("No spawn handler registered")
             return None
 
         entity = self._spawn_handler(
@@ -276,7 +282,9 @@ class GameLuaAPI(LuaAPIBase):
             width=width, height=height,
             color=color, sprite=sprite
         )
-        return entity.id if entity else None
+        entity_id = entity.id if entity else None
+        log.debug("Spawn entity_type=%s x=%s y=%s entity_id=%s", entity_type, x, y, entity_id)
+        return entity_id
 
     # =========================================================================
     # Entity Queries
