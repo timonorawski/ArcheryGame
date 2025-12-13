@@ -1,5 +1,7 @@
 # AMS Game Architecture — Design Rationale
 
+> **Note**: This document references "behaviors" as reusable game logic components. The implementation has evolved: behaviors are now **YAML bundles of interactions** rather than Lua scripts with lifecycle hooks. The philosophy remains the same—composition of reusable patterns—but the mechanism is now the declarative [interactions system](guides/INTERACTIONS.md).
+
 ## Core Observation
 
 Most arcade games are variations on a small number of mechanical patterns. The differences between games are primarily:

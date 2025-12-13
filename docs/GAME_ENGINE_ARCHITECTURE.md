@@ -1,8 +1,10 @@
 # Game Engine Architecture
 
+> **Note**: This document describes the game engine architecture. For the **unified interactions system** that replaces `collision_behaviors`, `input_mapping`, and Lua lifecycle behaviors, see [guides/INTERACTIONS.md](guides/INTERACTIONS.md).
+
 ## Overview
 
-The AMS Game Engine enables fully data-driven arcade games. Games are defined by YAML configuration and Lua behaviors—no Python code required for game logic.
+The AMS Game Engine enables fully data-driven arcade games. Games are defined by YAML configuration with declarative interactions—no Python code required for game logic.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

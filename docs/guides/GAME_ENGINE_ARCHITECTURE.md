@@ -1,6 +1,8 @@
 # Game Engine Architecture
 
-The YAML-driven game engine enables building complete games through declarative configuration rather than imperative code. Games are defined in `game.yaml` files with Lua behaviors for dynamic logic.
+> **Note**: This document describes the game engine architecture. For the **unified interactions system** that replaces `collision_behaviors`, `input_mapping`, and Lua lifecycle behaviors, see [INTERACTIONS.md](INTERACTIONS.md).
+
+The YAML-driven game engine enables building complete games through declarative configuration rather than imperative code. Games are defined in `game.yaml` files with interactions and action handlers.
 
 ## Overview
 

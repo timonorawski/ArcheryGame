@@ -1,3 +1,14 @@
+---
+status: archived
+archived: 2025-12-13
+reason: |
+  This visionary document describes a behavior-as-plugin system with Python/Lua
+  lifecycle hooks (on_hit, on_update). The transform concept lives on, but the
+  implementation changed: behaviors are now pure YAML collections of interactions,
+  not imperative code with lifecycle hooks. See the unified interactions system.
+superseded_by: docs/guides/INTERACTIONS.md
+---
+
 # Transform Behaviour
 The Transform & Behavior-as-Plugin Revolution  
 How One Line of YAML Changes What Things Are

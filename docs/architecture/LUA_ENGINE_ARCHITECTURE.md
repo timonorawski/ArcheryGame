@@ -1,12 +1,14 @@
 # Lua Engine & Game Engine Architecture
 
+> **Note**: This document describes the Lua engine architecture. The `collision_behaviors` and `input_mapping` systems have been replaced by the **unified interactions system**. See [../guides/INTERACTIONS.md](../guides/INTERACTIONS.md) for the current approach.
+
 This document describes the layered architecture of the Lua scripting engine and its integration with the YAML-driven game engine.
 
 ## Overview
 
 The system provides a data-driven game framework where:
-- **Game definitions** come from YAML (entities, behaviors, collisions, win/lose conditions)
-- **Entity logic** is implemented in Lua scripts (behaviors, collision actions, generators)
+- **Game definitions** come from YAML (entities, interactions, win/lose conditions)
+- **Entity logic** is implemented via interaction action handlers (Lua scripts)
 - **Python** handles rendering, input, physics orchestration, and lifecycle management
 
 This architecture enables creating new games primarily through configuration rather than code.

@@ -1,3 +1,14 @@
+---
+status: archived
+archived: 2025-12-13
+reason: |
+  This document describes the original Lua-based behavior system with lifecycle
+  hooks (on_spawn, on_update, on_hit, on_destroy). This architecture was replaced
+  by the unified interactions system where all entity relationships are expressed
+  declaratively in YAML. See docs/guides/INTERACTIONS.md for the current system.
+superseded_by: docs/guides/INTERACTIONS.md
+---
+
 **AMS Behavior System — Design Document**
 
 ## Overview

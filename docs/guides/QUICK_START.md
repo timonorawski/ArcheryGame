@@ -164,65 +164,40 @@ entity_types:
     height: 60
     color: red
     points: 10                           # Points awarded when hit
-    behaviors: [destroy_offscreen]       # Auto-destroy when leaving screen
-    behavior_config:
-      destroy_offscreen:
-        edges: all                       # Destroy on any edge
-        margin: 50                       # 50px past screen edge
     tags: [target]                       # Tag for easy identification
     render:
       - shape: circle                    # Draw as circle
         color: $color                    # Use entity's color
         radius: 0.5                      # 0.5 = half width (full circle)
+    interactions:
+      # Destroy when clicked
+      pointer:
+        when:
+          distance: 0
+          b.active: true
+        action: destroy
+      # Destroy when leaving screen
+      screen:
+        edges: [all]
+        action: destroy
 
   # Spawner - invisible entity that creates targets
   spawner:
     width: 1
     height: 1
-    behaviors:
-      - lua: |
-          -- Spawner behavior in Lua
-          local spawner = {}
-
-          function spawner.on_spawn(entity_id)
-              -- Initialize spawn timer
-              ams.set_prop(entity_id, "timer", 0)
-          end
-
-          function spawner.on_update(entity_id, dt)
-              -- Get current timer
-              local timer = ams.get_prop(entity_id, "timer") or 0
-              timer = timer + dt  -- dt = delta time in seconds
-
-              -- Spawn a target every 2 seconds
-              if timer >= 2.0 then
-                  ams.set_prop(entity_id, "timer", 0)  -- Reset timer
-
-                  -- Random position at top of screen
-                  local screen_w = ams.get_screen_width()
-                  local x = ams.random_range(50, screen_w - 50)
-                  local y = -30  -- Start above screen
-
-                  -- Spawn target moving downward
-                  ams.spawn("target", x, y, 0, 100, 0, 0, "", "")
-                  --        type      x  y  vx  vy  w  h  color sprite
-              else
-                  ams.set_prop(entity_id, "timer", timer)
-              end
-          end
-
-          return spawner
     render: []  # Invisible - no rendering
-
-# =============================================================================
-# Input Mapping - What Happens When Things Are Clicked
-# =============================================================================
-
-input_mapping:
-  target:
-    on_hit:
-      transform:
-        type: destroy  # Destroy target when clicked
+    interactions:
+      # Initialize on spawn
+      level:
+        - because: enter
+          action: init_spawner
+        # Spawn targets every 2 seconds using time interaction
+        - because: continuous
+          action: spawner_update
+          modifier:
+            interval: 2.0
+            spawn_type: target
+            spawn_vy: 100
 
 # =============================================================================
 # Player Configuration
@@ -262,27 +237,26 @@ entity_types:
     extends: target        # Inherit from base target
     color: yellow
     points: 25
-    behaviors: [destroy_offscreen]
-    behavior_config:
-      destroy_offscreen:
-        edges: all
-        margin: 50
     tags: [target]
     render:
       - shape: circle
         color: yellow
         radius: 0.5
+    interactions:
+      pointer:
+        when:
+          distance: 0
+          b.active: true
+        action: destroy
+      screen:
+        edges: [all]
+        action: destroy
 
   # Add a bomb - avoid clicking!
   bomb:
     width: 50
     height: 50
     color: [40, 40, 40]    # Dark gray
-    behaviors: [destroy_offscreen]
-    behavior_config:
-      destroy_offscreen:
-        edges: all
-        margin: 50
     tags: [bomb, hazard]
     render:
       - shape: circle
@@ -291,79 +265,43 @@ entity_types:
       - shape: circle        # Inner red warning
         color: [200, 0, 0]
         radius: 0.3
+    interactions:
+      # Clicking bombs costs a life
+      pointer:
+        when:
+          distance: 0
+          b.active: true
+        action: bomb_hit      # Custom action that destroys + loses life
+      screen:
+        edges: [all]
+        action: destroy
 ```
 
-#### Update Spawner to Use Multiple Types
+#### Update Spawner for Multiple Types
 
-Replace the spawner's Lua code with:
-
-```lua
-local spawner = {}
-
-function spawner.on_spawn(entity_id)
-    ams.set_prop(entity_id, "timer", 0)
-end
-
-function spawner.on_update(entity_id, dt)
-    local timer = ams.get_prop(entity_id, "timer") or 0
-    timer = timer + dt
-
-    if timer >= 1.5 then  -- Spawn faster
-        ams.set_prop(entity_id, "timer", 0)
-
-        local screen_w = ams.get_screen_width()
-        local x = ams.random_range(50, screen_w - 50)
-        local y = -30
-
-        -- Random entity type (70% regular, 20% fast, 10% bomb)
-        local rand = ams.random()
-        local entity_type
-        local vy
-
-        if rand < 0.7 then
-            entity_type = "target"
-            vy = 100
-        elseif rand < 0.9 then
-            entity_type = "target_fast"
-            vy = 180  -- Fast target moves faster
-        else
-            entity_type = "bomb"
-            vy = 80   -- Bombs move slower
-        end
-
-        ams.spawn(entity_type, x, y, 0, vy, 0, 0, "", "")
-    else
-        ams.set_prop(entity_id, "timer", timer)
-    end
-end
-
-return spawner
-```
-
-#### Add Input Mapping for New Types
+Update the spawner's action modifier to spawn different types:
 
 ```yaml
-input_mapping:
-  target:
-    on_hit:
-      transform:
-        type: destroy
-
-  target_fast:
-    on_hit:
-      transform:
-        type: destroy
-
-  bomb:
-    on_hit:
-      transform:
-        type: destroy
-
-# Add lose condition - clicking bombs costs a life
-lose_conditions:
-  - entity_type: bomb
-    event: destroyed
-    action: lose_life
+  spawner:
+    width: 1
+    height: 1
+    render: []
+    interactions:
+      level:
+        - because: enter
+          action: init_spawner
+        - because: continuous
+          action: multi_spawner_update
+          modifier:
+            interval: 1.5
+            spawn_weights:
+              target: 0.7        # 70% regular targets
+              target_fast: 0.2   # 20% fast targets
+              bomb: 0.1          # 10% bombs
+            spawn_speeds:
+              target: 100
+              target_fast: 180
+              bomb: 80
 ```
 
 Run again to see your enhanced game!
@@ -374,35 +312,68 @@ Run again to see your enhanced game!
 Define templates for game objects. Each can have:
 - **Physical properties:** `width`, `height`, `color`
 - **Game properties:** `points` (score when destroyed)
-- **Behaviors:** Pre-built actions (see below)
+- **Interactions:** Declarative relationships with other entities (see below)
 - **Tags:** Categories for grouping (`target`, `hazard`, etc.)
 - **Render:** How to draw it (shapes, sprites, text)
 
-#### Built-in Behaviors
+#### Interactions System
 
-| Behavior | Description | Config Example |
-|----------|-------------|----------------|
-| `gravity` | Apply gravity + velocity | `acceleration: 600` |
-| `destroy_offscreen` | Destroy when leaving screen | `edges: all`, `margin: 50` |
-| `bounce` | Bounce off screen edges | `walls: all`, `min_y: 0` |
-| `animate` | Cycle through sprite frames | `frames: 3`, `fps: 8` |
-| `fade_out` | Fade and destroy | `duration: 0.5` |
+All entity behavior is defined through interactions - declarative relationships between entities:
 
-#### Inline Lua Behaviors
+| Interaction Target | Purpose | Example |
+|-------------------|---------|---------|
+| `pointer` | Click/hit detection | `when: { distance: 0, b.active: true }` |
+| `screen` | Screen edge detection | `edges: [bottom]` |
+| `level` | Lifecycle hooks | `because: enter` (spawn), `continuous` (update) |
+| `time` | Timer-based triggers | `when: { elapsed: { gte: 5.0 } }` |
+| `<entity_type>` | Collision with other entities | `when: { distance: 0 }` |
 
-For custom logic, write Lua code directly in the YAML:
+See [INTERACTIONS.md](INTERACTIONS.md) for the full reference.
+
+#### Behaviors (Interaction Bundles)
+
+Behaviors are reusable collections of interactions. Use them to avoid repetition:
+
+| Behavior | Description | What it adds |
+|----------|-------------|--------------|
+| `gravity` | Apply gravity | `level` interaction with `because: continuous` |
+| `destroy_offscreen` | Destroy at screen edge | `screen` interaction with appropriate edges |
+| `bounce` | Bounce off edges | `screen` interactions for each wall |
+
+#### Custom Actions (Lua)
+
+For custom logic, create action handlers in `lua/interaction_action/`:
+
+```lua
+-- lua/interaction_action/my_action.lua.yaml
+description: My custom action
+lua: |
+  local action = {}
+
+  function action.execute(entity_id, other_id, modifier, context)
+      -- entity_id: the entity with this interaction
+      -- other_id: the target entity
+      -- modifier: config from YAML
+      -- context: runtime data (trigger, distance, angle, etc.)
+
+      ams.add_score(modifier.points or 10)
+      ams.destroy(entity_id)
+  end
+
+  return action
+```
+
+Then use it in your entity:
 
 ```yaml
-behaviors:
-  - lua: |
-      local behavior = {}
-      function behavior.on_spawn(id)
-          -- Initialize entity
-      end
-      function behavior.on_update(id, dt)
-          -- Update each frame (dt = delta time)
-      end
-      return behavior
+interactions:
+  pointer:
+    when:
+      distance: 0
+      b.active: true
+    action: my_action
+    modifier:
+      points: 25
 ```
 
 #### Essential Lua API Functions
@@ -886,7 +857,8 @@ python3 dev_game.py yourgame --help
 - Add debug prints in Lua: `print("spawning at", x, y)`
 
 **Input not working:**
-- Ensure `input_mapping` matches entity type names
+- Ensure `interactions.pointer` is defined on clickable entities
+- Check that `b.active: true` filter is set for click detection
 - Check collision detection logic (for Python games)
 - Verify event handling in `handle_input()`
 
@@ -998,51 +970,38 @@ entity_types:
     height: 50
     color: [255, 100, 100]
     points: 5
-    behaviors: [destroy_offscreen]
-    behavior_config:
-      destroy_offscreen:
-        edges: bottom
-        margin: 10
     tags: [target]
     render:
       - shape: circle
         color: [255, 100, 100]
         radius: 0.5
+    interactions:
+      # Destroy when clicked
+      pointer:
+        when:
+          distance: 0
+          b.active: true
+        action: destroy
+      # Lose life when target exits bottom
+      screen:
+        edges: [bottom]
+        action: lose_life_and_destroy
 
   # Spawner
   spawner:
     width: 1
     height: 1
-    behaviors:
-      - lua: |
-          local s = {}
-          function s.on_spawn(id)
-              ams.set_prop(id, "timer", 0)
-          end
-          function s.on_update(id, dt)
-              local t = ams.get_prop(id, "timer") + dt
-              if t >= 1.0 then
-                  ams.set_prop(id, "timer", 0)
-                  local w = ams.get_screen_width()
-                  local x = ams.random_range(50, w - 50)
-                  ams.spawn("target", x, -25, 0, 80, 0, 0, "", "")
-              else
-                  ams.set_prop(id, "timer", t)
-              end
-          end
-          return s
     render: []
-
-input_mapping:
-  target:
-    on_hit:
-      transform:
-        type: destroy
-
-lose_conditions:
-  - entity_type: target
-    event: offscreen
-    action: lose_life
+    interactions:
+      level:
+        - because: enter
+          action: init_spawner
+        - because: continuous
+          action: spawner_update
+          modifier:
+            interval: 1.0
+            spawn_type: target
+            spawn_vy: 80
 
 player:
   type: spawner

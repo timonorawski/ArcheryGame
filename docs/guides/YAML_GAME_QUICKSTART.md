@@ -1,5 +1,7 @@
 # YAML Game Quickstart Guide
 
+> **Note**: This guide contains examples using the legacy `behaviors`, `input_mapping`, and `collision_behaviors` systems. These have been replaced by the **unified interactions system**. See [INTERACTIONS.md](INTERACTIONS.md) for the current approach. The examples below still work but new games should use the interactions system.
+
 Create games using only YAML and Lua - no Python boilerplate required.
 
 ## Quick Start
